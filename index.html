@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YiClapOnline</title>
+  <link rel="shortcut icon" href="./assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <!-- 字体 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- 图标 -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,-25" />
+  <!-- 加载覆盖层样式 -->
+  <style>    
+    @font-face {
+      font-family: 'Pacifico';
+      src: url('./player/assets/fonts/pacifico.woff2') format('woff2');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+    
+    h1 {
+      font-family: 'Pacifico', cursive;
+      margin: 0;
+      font-weight: normal;
+    }
+    
+    .main-loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 1);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      opacity: 1;
+      transition: opacity 0.5s ease-out;
+    }
+    
+    .main-loading-overlay img {
+      width: 60px;
+    }
+  </style>
+</head>
+<body>
+  <!-- 主页加载覆盖层 -->
+  <div id="main-loading-overlay" class="main-loading-overlay">
+    <img src="./player/assets/images/loading.svg" alt="加载中...">
+  </div>
+  
+  <div class="container">
+    <header>
+      <div class="logo">
+        <img src="./assets/logo.svg" alt="YiClapOnline" width="120">
+        <h1>YiClapOnline</h1>
+      </div>
+      
+      <div class="search-container">
+        <div class="search-box">
+          <input type="text" id="search-input" placeholder="输入歌曲名称或歌手..." autofocus>
+          <button id="search-button" type="button">
+            <span class="search-text">搜索</span>
+            <span class="search-loading" style="display: none;">
+              <svg class="spinner" viewBox="0 0 24 24">
+                <circle class="path" cx="12" cy="12" r="10" fill="none" stroke-width="3"></circle>
+              </svg>
+            </span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div id="results-container" class="results-container" style="display: none;">
+        <div class="results-header">
+          <span>歌曲</span>
+          <span>歌手</span>
+          <span>操作</span>
+        </div>
+        <div id="results-list" class="results-list">
+          <!-- 搜索结果将动态插入这里 -->
+        </div>
+      </div>
+      
+      <div id="no-results" class="no-results" style="display: none;">
+        <p>未找到相关歌曲，请尝试其他关键词。</p>
+      </div>
+      
+      <div id="placeholder" class="placeholder">
+      </div>
+    </main>
+
+    <footer class="footer" style="font-family: 'Pacifico', cursive;">
+      <p>Copyright &copy; <span id="current-year"></span> lingyicute</p>
+    </footer>
+
+    <div id="player-container" class="player-container">
+      <iframe id="player-frame" src="" frameborder="0"></iframe>
+      <button id="close-player" class="close-player">
+        <span class="material-symbols-rounded">close</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 覆盖层处理脚本 -->
+  <script>
+    (function() {
+      // 文件已缓冲完成的简单检查
+      function checkAndHideOverlay() {
+        // 确保覆盖层至少显示300ms
+        setTimeout(function() {
+          const overlay = document.getElementById('main-loading-overlay');
+          if (!overlay) {
+            console.error('找不到覆盖层元素');
+            return;
+          }
+          
+          overlay.style.opacity = '0';
+          
+          setTimeout(function() {
+            if (overlay && overlay.parentNode) {
+              overlay.parentNode.removeChild(overlay);
+            }
+          }, 500);
+        }, 300);
+      }
+      
+      // 最长加载时间为8秒
+      const maxLoadingTime = 3000;
+      const loadingTimeout = setTimeout(function() {
+        console.warn('加载超时，强制隐藏覆盖层');
+        checkAndHideOverlay();
+      }, maxLoadingTime);
+      
+      // 当页面完全加载后
+      window.addEventListener('load', function() {
+        clearTimeout(loadingTimeout); // 清除超时定时器
+        checkAndHideOverlay();
+      });
+    })();
+  </script>
+  
+  <script src="./app.js"></script>
+</body>
+</html> 
