@@ -1,0 +1,808 @@
+@font-face {
+  font-family: 'xnn';
+  src: url('../fonts/Nebulove.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* 默认主题（浅色主题） */
+:root, :root.light-theme {
+
+  /**
+   * colors
+   */
+
+  --eerie-black_a95: hsla(204, 9%, 95%, 0.95);
+  --eerie-black_a50: hsla(204, 9%, 95%, 0.5);
+  --eerie-black: hsl(204, 9%, 95%);
+  --gainsboro: hsl(225, 7%, 20%);
+  --charcoal: hsl(203, 9%, 85%);
+  --silver-sand: hsl(208, 12%, 30%);
+  --light-sky-blue: hsl(200, 100%, 50%);
+  --prussian-blue: hsl(196, 80%, 90%);
+  --black: hsl(0, 0%, 100%);
+  --black_a50: hsla(0, 0%, 0%, 0.1);
+  --black_a20: hsla(0, 0%, 0%, 0.05);
+  --light-sky-blue_a8: rgba(0, 120, 212, 0.08);
+  --light-sky-blue_a12: rgba(0, 120, 212, 0.12);
+  --silver-sand_a8: hsla(208, 12%, 30%, 0.08);
+  --silver-sand_a12: hsla(208, 12%, 30%, 0.12);
+  
+  --background: var(--eerie-black);
+  --background-opacity: var(--eerie-black_a95);
+  --on-background: var(--gainsboro);
+  --surface-variant: var(--charcoal);
+  --on-surface-variant: var(--silver-sand);
+  --on-surface-variant-hover: var(--light-sky-blue_a8);
+  --on-surface-variant-focus: var(--light-sky-blue_a12);
+  --primary: var(--light-sky-blue);
+  --on-primary: var(--prussian-blue);
+
+  /**
+   * gradient
+   */
+
+  --gradient: linear-gradient(180deg, hsla(204, 9%, 95%, 0.95) 60%, rgba(255, 255, 255, 0.8) 120%);
+  --player-gradient: linear-gradient(90deg, hsla(204, 9%, 95%, 0.95) 0%, hsla(204, 9%, 95%, 0.95) 100%);
+
+
+
+  --headline-sm: 2.6rem;
+  --title-lg: 2.2rem;
+  --label-lg: 1.4rem;
+  --label-md: 1.5rem;
+  
+  --fw-400: 400;
+  --fw-500: 500;
+
+  /**
+   * box shadow
+   */
+
+  --shadow-1: 0 1px 4px 1px var(--black_a20);
+  --shadow-2: 0 1px 4px 1px var(--black_a50);
+
+  /**
+   * border radius
+   */
+
+  --radius-24: 24px;
+  --radius-16: 16px;
+  --radius-12: 12px;
+  --radius-pill: 100px;
+  --radius-circle: 50%;
+
+  /**
+   * transition
+   */
+
+  --transition-1: 200ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-2: 300ms cubic-bezier(0.2, 0, 0, 1);
+
+}
+
+/* 深色主题 */
+:root.dark-theme {
+  --eerie-black_a95: hsla(204, 9%, 11%, 0.95);
+  --eerie-black_a50: hsla(204, 9%, 11%, 0.5);
+  --eerie-black: hsl(204, 9%, 11%);
+  --gainsboro: hsl(225, 7%, 89%);
+  --charcoal: hsl(203, 9%, 28%);
+  --silver-sand: hsl(208, 12%, 78%);
+  --light-sky-blue: hsl(200, 100%, 73%);
+  --prussian-blue: hsl(196, 100%, 14%);
+  --black: hsl(0, 0%, 0%);
+  --black_a50: hsla(0, 0%, 0%, 0.5);
+  --black_a20: hsla(0, 0%, 0%, 0.2);
+  --light-sky-blue_a8: hsla(200, 100%, 73%, 0.08);
+  --light-sky-blue_a12: hsla(200, 100%, 73%, 0.12);
+  --silver-sand_a8: hsla(208, 12%, 78%, 0.08);
+  --silver-sand_a12: hsla(208, 12%, 78%, 0.12);
+  
+  --gradient: linear-gradient(180deg, hsla(204, 9%, 11%, 0.90) 60%, transparent 120%);
+  --player-gradient: linear-gradient(90deg, hsla(204, 9%, 11%, 0.95) 0%, hsla(204, 9%, 11%, 0.95) 100%);
+}
+
+/* 深色主题下的特定样式调整 */
+:root.dark-theme .player-control .play {
+  background-color: var(--surface-variant);
+  color: var(--primary);
+}
+
+:root.dark-theme .player-control .play.active {
+  background-color: var(--primary);
+  color: var(--on-primary);
+}
+
+:root.dark-theme .music-banner {
+  box-shadow: none;
+}
+
+/* 浅色主题下的特定样式调整 */
+:root.light-theme .player-control .play {
+  background-color: var(--silver-sand);
+  color: var(--black);
+}
+
+:root.light-theme .player-control .play.active {
+  background-color: var(--light-sky-blue);
+  color: var(--black);
+}
+
+:root.light-theme .player-control .toggle.active {
+  color: var(--light-sky-blue);
+}
+
+:root.light-theme .music-banner {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 主题切换动画 */
+body, 
+.player, 
+.music-banner, 
+.btn-icon, 
+.range-fill, 
+.range::-webkit-slider-thumb, 
+.player-control .play {
+  transition: all 0.3s ease;
+}
+
+
+
+
+
+/*-----------------------------------*\
+  #RESET
+\*-----------------------------------*/
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+li { list-style: none; }
+
+a,
+img,
+span,
+input,
+button { display: block; }
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+img { height: auto; }
+
+input,
+button {
+  background: none;
+  border: none;
+  font: inherit;
+  background-color: transparent;
+}
+
+input { width: 100%; }
+
+button { cursor: pointer; }
+
+html {
+  font-family: 'xnn'; 
+  font-size: 10px;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--black);
+  color: var(--on-background);
+  font-size: 1.6rem;
+  line-height: 1.5;
+  min-height: 100vh;
+  min-width: 250px;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+  overflow: overlay;
+}
+
+body.modalActive { overflow: hidden; }
+
+::-webkit-scrollbar { width: 8px; }
+
+::-webkit-scrollbar-track { background: transparent; }
+
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: var(--radius-pill);
+}
+
+body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); }
+
+
+
+
+
+/*-----------------------------------*\
+  #REUSED STYLE
+\*-----------------------------------*/
+
+.material-symbols-rounded {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' -25, 'opsz' 24;
+  width: 1em;
+  height: 1em;
+  overflow: hidden;
+  user-select: none;
+}
+
+.wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.title-lg {
+  font-size: var(--title-lg);
+  font-weight: var(--fw-400);
+}
+
+.btn-icon {
+  color: var(--on-surface-variant);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-circle);
+}
+
+.btn-icon:hover { background-color: var(--on-surface-variant-hover); }
+
+.btn-icon:is(:focus, :focus-visible) {
+  background-color: var(--on-surface-variant-focus);
+}
+
+.img-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.3s ease;
+}
+
+.headline-sm {
+  font-size: var(--headline-sm);
+  font-weight: var(--fw-400);
+}
+
+.label-lg,
+.label-md { font-weight: var(--fw-500); }
+
+.label-lg {
+  font-size: var(--label-lg);
+  letter-spacing: 0.1px;
+}
+
+.label-md {
+  font-size: var(--label-md);
+  letter-spacing: 0.5px;
+}
+
+
+
+
+
+/*-----------------------------------*\
+  #PLAYER
+\*-----------------------------------*/
+
+/* 基础播放器样式 - 适用于所有尺寸 */
+.player {
+  --padding: 24px;
+  background-image: var(--gradient);
+  padding: var(--padding);
+  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  backdrop-filter: blur(30px);
+  overflow: hidden;
+  width: 100vw;
+  max-width: 100vw;
+  box-sizing: border-box;
+  margin: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.player .container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding-top: 12vh;
+  padding-bottom: 8vh;
+}
+
+.music-content {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+  justify-content: space-between;
+  height: 100%;
+}
+
+.text-content {
+  text-align: left;
+  margin-bottom: 0;
+  width: 100%;
+  flex-grow: 0;
+  flex-shrink: 0;
+}
+
+.music-banner-container {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  flex-grow: 1;
+  width: 100%;
+  margin: auto 0;
+}
+
+.music-banner {
+  aspect-ratio: 1 / 1;
+  background-color: var(--surface-variant);
+  width: auto;
+  height: auto;
+  max-width: min(100%, 70vh);
+  max-height: min(50vh, 70vw);
+  margin-inline: 0;
+  align-self: flex-start;
+  overflow: hidden;
+  border-radius: var(--radius-24);
+  object-fit: contain;
+}
+
+.artist {
+  opacity: 0.6;
+  margin-block-end: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+}
+
+.seek-control { 
+  margin-block-end: 0; 
+  position: relative;
+  width: 100%;
+  flex-grow: 0;
+  flex-shrink: 0;
+}
+
+.seek-wrapper {
+  width: 100%;
+  overflow: visible;
+}
+
+.range-wrapper { 
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.range {
+  appearance: none;
+  cursor: pointer;
+  background: transparent;
+  width: 100%;
+}
+
+.range::-webkit-slider-runnable-track {
+  appearance: none;
+  background-color: var(--surface-variant);
+  height: 6px;
+  width: 100%;
+  border-radius: var(--radius-pill);
+}
+
+.range-fill {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 6px;
+  background-color: var(--primary);
+  border-radius: var(--radius-pill);
+  pointer-events: none;
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  background-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  margin-block-start: -5px;
+  border-radius: var(--radius-pill);
+  transition: var(--transition-1);
+}
+
+.range::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 12px var(--on-surface-variant-hover);
+}
+
+.range::-webkit-slider-thumb:is(:focus, :focus-visible) {
+  box-shadow: 0 0 0 12px var(--on-surface-variant-focus);
+}
+
+.duration-label {
+  justify-content: space-between;
+  margin-block-start: 12px;
+}
+
+.player-control { 
+  justify-content: flex-start;
+  gap: 24px;
+  width: 100%;
+}
+
+.player-control .toggle.active { color: var(--primary); }
+
+.player-control .play {
+  background-color: var(--surface-variant);
+  color: var(--primary);
+}
+
+.player-control .play.active {
+  background-color: var(--primary);
+  color: var(--on-primary);
+}
+
+.player-control .btn-icon.active .default-icon,
+.player-control .btn-icon .active-icon { display: none; }
+
+.player-control .btn-icon .default-icon,
+.player-control .btn-icon.active .active-icon { display: block; }
+
+/* 音量控制器样式 - 默认隐藏 */
+.volume {
+  display: none !important;
+  width: auto;
+  min-width: auto;
+  position: relative;
+  z-index: 2;
+  background-color: transparent;
+}
+
+/* 强制音量控件背景透明 */
+.volume input[type="range"],
+.volume input[type="range"]::-webkit-slider-runnable-track {
+  background-color: transparent !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  border: none !important;
+  outline: none !important;
+}
+
+/*-----------------------------------*\
+  #MEDIA QUERIES
+\*-----------------------------------*/
+
+/**
+ * responsive for large than 575px screen
+ */
+@media (min-width: 575px) {
+  body { }
+  .player .container { max-width: 540px; }
+}
+
+/* 中等屏幕布局 (575px-992px) */
+@media (min-width: 575px) and (max-width: 991px) {
+  .player { justify-content: flex-start; }
+  
+  .player .container {
+    max-width: 100%;
+    padding-top: 12vh;
+    padding-bottom: 8vh;
+    flex-direction: column;
+  }
+  
+  .music-banner-container {
+    order: 0;
+    flex-grow: 1;
+    margin: auto 0;
+  }
+  
+  .music-content {
+    order: 1;
+    height: auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .text-content {
+    order: -1;
+    margin-bottom: 20px;
+  }
+  
+  .seek-control {
+    order: 1;
+    margin-top: 20px;
+  }
+  
+  .music-banner {
+    aspect-ratio: 1 / 1;
+    max-width: min(100%, 60vh);
+    max-height: min(40vh, 60vw);
+  }
+}
+
+/* 小屏幕样式 (小于575px) */
+@media (max-width: 575px) {
+  .player { 
+    --padding: 16px; 
+    justify-content: flex-start !important;
+  }
+  
+  .player .container {
+    max-width: 100% !important;
+    padding-top: 12vh !important;
+    padding-bottom: 8vh !important;
+    flex-direction: column !important;
+  }
+  
+  .music-banner-container {
+    order: 0 !important;
+    flex-grow: 1 !important;
+    margin: auto 0 !important;
+  }
+  
+  .music-content {
+    order: 1 !important;
+    height: auto !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  
+  .text-content {
+    order: -1 !important;
+    margin-bottom: 20px !important;
+  }
+  
+  .seek-control {
+    order: 1 !important;
+    margin-top: 20px !important;
+  }
+  
+  .music-banner {
+    aspect-ratio: 1 / 1 !important;
+    max-width: min(100%, 70vw) !important;
+    max-height: min(40vh, 70vw) !important;
+  }
+}
+
+/* 针对移动设备的样式 */
+@media (max-width: 767px) {
+  .seek-control {
+    width: 100%;
+    max-width: 100%;
+    margin-inline: auto;
+    overflow: visible;
+  }
+  
+  .range-wrapper {
+    max-width: 100%;
+    width: 100%;
+  }
+  
+  .range {
+    width: 100%;
+    background: transparent;
+  }
+}
+
+/**
+ * responsive for large than 992px screen
+ */
+@media (min-width: 992px) {
+  /* 修改自定义属性 */
+  :root, :root.light-theme {
+    --headline-sm: 4.2rem;
+    --label-lg: 2.2rem;
+  }
+  
+  article { display: flex; }
+  
+  .btn-icon {
+    width: 54px;
+    height: 54px;
+  }
+  
+  .btn-icon .material-symbols-rounded { font-size: 2.8rem; }
+  
+  /* 宽屏布局样式 */
+  .player {
+    --padding: 48px;
+    flex-direction: row;
+    height: auto;
+    min-height: 100vh;
+    align-items: center;
+    backdrop-filter: blur(100px);
+    background-image: var(--player-gradient);
+    background-size: cover;
+    width: 100vw;
+    position: fixed;
+  }
+  
+  .player .container {
+    max-width: 1200px;
+    flex-direction: row;
+    gap: 48px;
+    max-height: 500px;
+    height: 100%;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  
+  .music-banner-container {
+    order: -1;
+    flex-grow: 0;
+    flex-shrink: 0;
+    max-width: 45%;
+    height: 100%;
+    margin: 0 !important;
+    justify-content: center;
+    display: flex;
+    align-items: center;
+  }
+  
+  .music-banner {
+    max-width: max-content;
+    max-height: 100%;
+    margin-bottom: 0;
+    margin-inline: auto;
+    align-self: center;
+  }
+  
+  .music-content {
+    min-width: 0;
+    width: 100%;
+    margin-left: 20px;
+  }
+  
+  .text-content {
+    margin-bottom: 30px;
+    max-width: 100%;
+    position: relative;
+    z-index: 1;
+  }
+  
+  .music-content :is(.headline-sm, .label-lg, .label-md) {
+    max-width: 85%;
+  }
+  
+  .artist { 
+    --label-md: 1.8rem;
+    max-width: 85%;
+  }
+  
+  .seek-control {
+    margin-block-start: auto;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 24px;
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+    margin-bottom: 24px;
+  }
+  
+  .player-control {
+    min-width: max-content;
+    gap: 24px;
+  }
+  
+  /* 显示音量控制 */
+  .volume {
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    margin-block-start: -30px;
+    width: 150px;
+    min-width: 150px;
+    z-index: 5;
+    background-color: var(--background-opacity);
+    padding: 4px 8px;
+    border-radius: var(--radius-pill);
+    margin-right: -8px;
+  }
+  
+  .volume .btn-icon { 
+    flex-shrink: 0; 
+    margin-right: 4px;
+    background-color: var(--background-opacity);
+    position: relative;
+    z-index: 5;
+    width: 36px;
+    height: 36px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+  
+  .volume .range-wrapper {
+    width: 100%;
+    max-width: 100px;
+    position: relative;
+    z-index: 5;
+  }
+  
+  .volume .range-fill { width: 100%; }
+  
+  /* 超宽屏幕下修复容器限制 */
+  @media (min-width: 1921px) {
+    .player .container {
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+  }
+}
+
+/**
+ * 主题相关的样式覆盖
+ */
+
+/* 浅色主题下的滑块颜色 */
+:root.light-theme .range::-webkit-slider-thumb {
+  background-color: var(--light-sky-blue);
+}
+
+:root.light-theme .range-fill {
+  background-color: var(--light-sky-blue);
+}
+
+:root.light-theme .toggle.active {
+  color: var(--light-sky-blue);
+}
+
+:root.light-theme .volume input[type="range"]::-webkit-slider-thumb {
+  background-color: var(--light-sky-blue);
+}
+
+/* 按下按钮时的浅色主题状态修复 */
+:root.light-theme .btn-icon:active {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+:root.light-theme .player-control .btn-icon:not(.toggle):active {
+  transform: scale(0.95);
+}
+
+:root.light-theme .player-control .toggle:active,
+:root.light-theme .player-control .play:active {
+  opacity: 0.8;
+}
+
+/* 深色主题下的滑块样式 */
+:root.dark-theme .range::-webkit-slider-thumb {
+  background-color: var(--light-sky-blue);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
+}
+
+:root.dark-theme .volume input[type="range"]::-webkit-slider-thumb {
+  background-color: var(--light-sky-blue);
+}
+
+:root.dark-theme .range-fill {
+  background-color: var(--light-sky-blue);
+}
