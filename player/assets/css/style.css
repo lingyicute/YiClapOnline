@@ -451,7 +451,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .player-control { 
   justify-content: flex-start;
-  gap: 24px;
+  gap: 13px;
   width: 100%;
 }
 
@@ -554,6 +554,11 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
     justify-content: flex-start !important;
   }
   
+  .player-control {
+    min-width: max-content;
+    gap: 9px;
+  }
+
   .player .container {
     max-width: 100% !important;
     padding-top: 12vh !important;

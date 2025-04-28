@@ -1,6 +1,107 @@
 'use strict';
 
 /**
+ * 收藏功能 - 使用cookie保存收藏的歌曲
+ */
+const favoriteControl = {
+  // 获取收藏列表
+  getFavorites() {
+    const favCookie = this.getCookie('li-favorites');
+    if (!favCookie) return [];
+    
+    try {
+      return JSON.parse(favCookie);
+    } catch (error) {
+      console.error('解析收藏列表失败:', error);
+      return [];
+    }
+  },
+  
+  // 添加收藏
+  addFavorite(songId, title, artist) {
+    if (!songId) return false;
+    
+    const favorites = this.getFavorites();
+    
+    // 检查是否已经收藏
+    const existingIndex = favorites.findIndex(item => item.id === songId);
+    if (existingIndex !== -1) return false;
+    
+    // 添加到收藏列表
+    favorites.push({ id: songId, title, artist });
+    
+    // 保存到cookie
+    this.setCookie('li-favorites', JSON.stringify(favorites));
+    return true;
+  },
+  
+  // 移除收藏
+  removeFavorite(songId) {
+    if (!songId) return false;
+    
+    const favorites = this.getFavorites();
+    
+    // 查找并移除
+    const existingIndex = favorites.findIndex(item => item.id === songId);
+    if (existingIndex === -1) return false;
+    
+    favorites.splice(existingIndex, 1);
+    
+    // 保存到cookie
+    this.setCookie('li-favorites', JSON.stringify(favorites));
+    return true;
+  },
+  
+  // 检查是否已收藏
+  isFavorite(songId) {
+    if (!songId) return false;
+    
+    const favorites = this.getFavorites();
+    return favorites.some(item => item.id === songId);
+  },
+  
+  // 获取指定名称的cookie值
+  getCookie(name) {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.startsWith(name + '=')) {
+        return decodeURIComponent(cookie.substring(name.length + 1));
+      }
+    }
+    return null;
+  },
+
+  // 设置cookie
+  setCookie(name, value, days = 365) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    const expires = "expires=" + date.toUTCString();
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    document.cookie = name + "=" + encodeURIComponent(value) + ";" + expires + ";path=/;SameSite=Lax" + secure;
+  },
+  
+  // 更新收藏按钮UI
+  updateFavoriteButtonUI(isFav) {
+    const favoriteBtn = document.querySelector("[data-favorite]");
+    if (!favoriteBtn) return;
+    
+    const iconElement = favoriteBtn.querySelector(".material-symbols-rounded");
+    if (!iconElement) return;
+    
+    if (isFav) {
+      iconElement.textContent = "favorite";
+      iconElement.style.color = "#ff3e55";
+      favoriteBtn.classList.add("active");
+    } else {
+      iconElement.textContent = "favorite_border";
+      iconElement.style.color = "";
+      favoriteBtn.classList.remove("active");
+    }
+  }
+};
+
+/**
  * 主题控制 - 读取li-darkmode cookie并应用相应主题
  * 0: 浅色主题(默认), 1: 深色主题
  */
@@ -22,7 +123,8 @@ const themeControl = {
     const date = new Date();
     date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
     const expires = "expires=" + date.toUTCString();
-    document.cookie = name + "=" + value + ";" + expires + ";path=/";
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    document.cookie = name + "=" + value + ";" + expires + ";path=/;SameSite=Lax" + secure;
   },
 
   // 切换主题
@@ -370,6 +472,17 @@ const updatePlayerUI = (songInfo) => {
 
     // 设置音频源
     audioSource.src = songInfo.musicPath;
+    
+    // 存储当前歌曲信息到全局变量，以便收藏功能访问
+    window.currentSong = {
+      id: songInfo.id,
+      title: songInfo.title,
+      artist: songInfo.artist
+    };
+    
+    // 更新收藏状态
+    favoriteControl.updateFavoriteButtonUI(favoriteControl.isFavorite(songInfo.id));
+    
     audioSource.addEventListener("loadeddata", () => {
       // 更新音频时长
       updateDuration();
@@ -984,4 +1097,34 @@ window.addEventListener('DOMContentLoaded', () => {
   
   // 修复音量控制器样式
   fixVolumeSliderStyle();
+
+  // 收藏按钮事件
+  const favoriteBtn = document.querySelector("[data-favorite]");
+  if (favoriteBtn) {
+    favoriteBtn.addEventListener("click", function() {
+      try {
+        if (!window.currentSong || !window.currentSong.id) {
+          console.warn('无法收藏：当前没有播放歌曲或歌曲ID不可用');
+          return;
+        }
+        
+        const songId = window.currentSong.id;
+        const title = window.currentSong.title;
+        const artist = window.currentSong.artist;
+        
+        // 检查是否已收藏，执行相应操作
+        if (favoriteControl.isFavorite(songId)) {
+          // 取消收藏
+          favoriteControl.removeFavorite(songId);
+          favoriteControl.updateFavoriteButtonUI(false);
+        } else {
+          // 添加收藏
+          favoriteControl.addFavorite(songId, title, artist);
+          favoriteControl.updateFavoriteButtonUI(true);
+        }
+      } catch (error) {
+        console.error('Error toggling favorite:', error);
+      }
+    });
+  }
 });
