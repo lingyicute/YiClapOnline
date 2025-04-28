@@ -30,7 +30,13 @@
   </style>
 </head>
 <body>
-  <!-- 全新主题切换按钮，移回右上角 -->
+  <!-- 右上角按钮 -->
+  <button id="favorites-btn" style="position:fixed; top:20px; right:70px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.8); color:var(--text-color); border:1px solid rgba(0,0,0,0.1); cursor:pointer; z-index:999; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 10px rgba(0,0,0,0.1); transition:all 0.3s ease;" 
+  onmouseover="this.style.backgroundColor='#4285F4'; this.style.color='white';" 
+  onmouseout="this.style.backgroundColor=document.documentElement.classList.contains('dark-theme') ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)'; this.style.color=document.documentElement.classList.contains('dark-theme') ? '#E0E0E0' : '#333';">
+    <span class="material-symbols-rounded">favorite_border</span>
+  </button>
+  
   <button id="new-theme-toggle" style="position:fixed; top:20px; right:20px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.8); color:var(--text-color); border:1px solid rgba(0,0,0,0.1); cursor:pointer; z-index:999; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 10px rgba(0,0,0,0.1); transition:all 0.3s ease;" 
   onmouseover="this.style.backgroundColor='#4285F4'; this.style.color='white';" 
   onmouseout="this.style.backgroundColor=document.documentElement.classList.contains('dark-theme') ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)'; this.style.color=document.documentElement.classList.contains('dark-theme') ? '#E0E0E0' : '#333';">
@@ -78,6 +84,18 @@
         </div>
         <div id="results-list" class="results-list">
           <!-- 搜索结果将动态插入这里 -->
+        </div>
+      </div>
+      
+      <!-- 收藏列表容器 -->
+      <div id="favorites-container" class="results-container" style="display: none;">
+        <div class="results-header">
+          <span>收藏歌曲</span>
+          <span>歌手</span>
+          <span>操作</span>
+        </div>
+        <div id="favorites-list" class="results-list">
+          <!-- 收藏列表将动态插入这里 -->
         </div>
       </div>
       
@@ -140,5 +158,18 @@
   </script>
   
   <script src="./app.js"></script>
+  
+  <!-- 更新提示弹窗 -->
+  <div class="update-modal-overlay" id="updateOverlay"></div>
+  <div class="update-modal" id="updateModal">
+    <div class="update-modal-title">发现新版本</div>
+    <div class="update-modal-time" id="updateTime"></div>
+    <div class="update-modal-content" id="updateContent">
+      <ul id="updateList"></ul>
+    </div>
+    <div class="update-modal-button">
+      <button id="refreshButton">刷新</button>
+    </div>
+  </div>
 </body>
 </html> 
