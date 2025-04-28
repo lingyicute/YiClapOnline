@@ -107,86 +107,95 @@ const fetchSongInfo = async (songId) => {
     const html = await response.text();
     
     // 输出HTML结构以便于分析
-    console.log('HTML文档结构:', html.includes('window.mp3_id') ? '包含window.mp3_id' : '不包含window.mp3_id');
-    console.log('HTML文档结构:', html.includes('window.play_id') ? '包含window.play_id' : '不包含window.play_id');
+    console.log('HTML文档结构检查:', 
+      (html.includes('window.mp3_id') ? '包含window.mp3_id' : '不包含window.mp3_id') + ', ' +
+      (html.includes('window.play_id') ? '包含window.play_id' : '不包含window.play_id') + ', ' + 
+      (html.includes('window.appData') ? '包含window.appData' : '不包含window.appData')
+    );
     
     // 从HTML中提取关键信息
     let mp3Id = '', playId = '', mp3Title = '', mp3Author = '', mp3Cover = '';
 
-    // 尝试多种正则匹配mp3_id
-    const mp3IdMatch = html.match(/window\.mp3_id\s*=\s*['"]([^'"]+)['"]/);
-    // 尝试替代模式
-    const mp3IdAltMatch = html.match(/mp3_id\s*=\s*['"]([^'"]+)['"]/);
-    if (mp3IdMatch && mp3IdMatch[1]) {
-      mp3Id = mp3IdMatch[1];
-      console.log('提取的mp3_id:', mp3Id);
-    } else if (mp3IdAltMatch && mp3IdAltMatch[1]) {
-      mp3Id = mp3IdAltMatch[1];
-      console.log('从替代模式提取的mp3_id:', mp3Id);
+    // 首先尝试从appData中提取数据（新格式）
+    const appDataMatch = html.match(/window\.appData\s*=\s*(\{.*?\});/s);
+    if (appDataMatch && appDataMatch[1]) {
+      try {
+        const appData = JSON.parse(appDataMatch[1]);
+        mp3Id = appData.mp3_id?.toString() || '';
+        playId = appData.play_id || '';
+        mp3Title = appData.mp3_title || '';
+        mp3Author = appData.mp3_author || '';
+        mp3Cover = appData.mp3_cover || '';
+        console.log('成功从appData提取数据');
+      } catch (e) {
+        console.error('解析appData失败:', e);
+      }
     }
     
-    // 尝试多种正则匹配play_id
-    const playIdMatch = html.match(/window\.play_id\s*=\s*['"]([^'"]+)['"]/);
-    // 尝试替代模式
-    const playIdAltMatch = html.match(/play_id\s*=\s*['"]([^'"]+)['"]/);
-    const playIdAlt2Match = html.match(/data-play-id\s*=\s*['"]([^'"]+)['"]/);
-    if (playIdMatch && playIdMatch[1]) {
-      playId = playIdMatch[1];
-      console.log('提取的play_id:', playId);
-    } else if (playIdAltMatch && playIdAltMatch[1]) {
-      playId = playIdAltMatch[1];
-      console.log('从替代模式提取的play_id:', playId);
-    } else if (playIdAlt2Match && playIdAlt2Match[1]) {
-      playId = playIdAlt2Match[1];
-      console.log('从替代模式2提取的play_id:', playId);
-    }
-    
-    // 尝试多种正则匹配mp3_title
-    const mp3TitleMatch = html.match(/window\.mp3_title\s*=\s*['"]([^'"]+)['"]/);
-    // 尝试替代模式
-    const mp3TitleAltMatch = html.match(/<title>(.*?)(?:\s*[-|]\s*.*?)?<\/title>/);
-    const mp3TitleAlt2Match = html.match(/class=["']title["'][^>]*>(.*?)<\/[^>]+>/);
-    if (mp3TitleMatch && mp3TitleMatch[1]) {
-      mp3Title = mp3TitleMatch[1];
-      console.log('提取的mp3_title:', mp3Title);
-    } else if (mp3TitleAltMatch && mp3TitleAltMatch[1]) {
-      mp3Title = mp3TitleAltMatch[1].trim();
-      console.log('从替代模式提取的mp3_title:', mp3Title);
-    } else if (mp3TitleAlt2Match && mp3TitleAlt2Match[1]) {
-      mp3Title = mp3TitleAlt2Match[1].trim();
-      console.log('从替代模式2提取的mp3_title:', mp3Title);
-    }
-    
-    // 尝试多种正则匹配mp3_author
-    const mp3AuthorMatch = html.match(/window\.mp3_author\s*=\s*['"]([^'"]+)['"]/);
-    // 尝试替代模式
-    const mp3AuthorAltMatch = html.match(/class=["']author["'][^>]*>(.*?)<\/[^>]+>/);
-    const mp3AuthorAlt2Match = html.match(/歌手[：:]\s*<[^>]+>(.*?)<\/[^>]+>/);
-    if (mp3AuthorMatch && mp3AuthorMatch[1]) {
-      mp3Author = mp3AuthorMatch[1];
-      console.log('提取的mp3_author:', mp3Author);
-    } else if (mp3AuthorAltMatch && mp3AuthorAltMatch[1]) {
-      mp3Author = mp3AuthorAltMatch[1].trim();
-      console.log('从替代模式提取的mp3_author:', mp3Author);
-    } else if (mp3AuthorAlt2Match && mp3AuthorAlt2Match[1]) {
-      mp3Author = mp3AuthorAlt2Match[1].trim();
-      console.log('从替代模式2提取的mp3_author:', mp3Author);
-    }
-    
-    // 尝试多种正则匹配mp3_cover
-    const mp3CoverMatch = html.match(/window\.mp3_cover\s*=\s*['"]([^'"]+)['"]/);
-    // 尝试替代模式
-    const mp3CoverAltMatch = html.match(/class=["']cover["'][^>]*src=["']([^'"]+)["']/);
-    const mp3CoverAlt2Match = html.match(/<img[^>]*src=["']([^'"]+(?:jpg|png|gif|jpeg))["'][^>]*class=["'][^"']*cover/);
-    if (mp3CoverMatch && mp3CoverMatch[1]) {
-      mp3Cover = mp3CoverMatch[1];
-      console.log('提取的mp3_cover:', mp3Cover);
-    } else if (mp3CoverAltMatch && mp3CoverAltMatch[1]) {
-      mp3Cover = mp3CoverAltMatch[1];
-      console.log('从替代模式提取的mp3_cover:', mp3Cover);
-    } else if (mp3CoverAlt2Match && mp3CoverAlt2Match[1]) {
-      mp3Cover = mp3CoverAlt2Match[1];
-      console.log('从替代模式2提取的mp3_cover:', mp3Cover);
+    // 如果appData中没有提取到数据，则使用原有的提取逻辑作为备用
+    if (!playId) {
+      console.log('使用备用方法提取数据');
+      // 尝试多种正则匹配mp3_id
+      const mp3IdMatch = html.match(/window\.mp3_id\s*=\s*['"]([^'"]+)['"]/);
+      // 尝试替代模式
+      const mp3IdAltMatch = html.match(/mp3_id\s*=\s*['"]([^'"]+)['"]/);
+      if (mp3IdMatch && mp3IdMatch[1]) {
+        mp3Id = mp3IdMatch[1];
+      } else if (mp3IdAltMatch && mp3IdAltMatch[1]) {
+        mp3Id = mp3IdAltMatch[1];
+      }
+      
+      // 尝试多种正则匹配play_id
+      const playIdMatch = html.match(/window\.play_id\s*=\s*['"]([^'"]+)['"]/);
+      // 尝试替代模式
+      const playIdAltMatch = html.match(/play_id\s*=\s*['"]([^'"]+)['"]/);
+      const playIdAlt2Match = html.match(/data-play-id\s*=\s*['"]([^'"]+)['"]/);
+      if (playIdMatch && playIdMatch[1]) {
+        playId = playIdMatch[1];
+      } else if (playIdAltMatch && playIdAltMatch[1]) {
+        playId = playIdAltMatch[1];
+      } else if (playIdAlt2Match && playIdAlt2Match[1]) {
+        playId = playIdAlt2Match[1];
+      }
+      
+      // 尝试多种正则匹配mp3_title
+      const mp3TitleMatch = html.match(/window\.mp3_title\s*=\s*['"]([^'"]+)['"]/);
+      // 尝试替代模式
+      const mp3TitleAltMatch = html.match(/<title>(.*?)(?:\s*[-|]\s*.*?)?<\/title>/);
+      const mp3TitleAlt2Match = html.match(/class=["']title["'][^>]*>(.*?)<\/[^>]+>/);
+      if (mp3TitleMatch && mp3TitleMatch[1]) {
+        mp3Title = mp3TitleMatch[1];
+      } else if (mp3TitleAltMatch && mp3TitleAltMatch[1]) {
+        mp3Title = mp3TitleAltMatch[1].trim();
+      } else if (mp3TitleAlt2Match && mp3TitleAlt2Match[1]) {
+        mp3Title = mp3TitleAlt2Match[1].trim();
+      }
+      
+      // 尝试多种正则匹配mp3_author
+      const mp3AuthorMatch = html.match(/window\.mp3_author\s*=\s*['"]([^'"]+)['"]/);
+      // 尝试替代模式
+      const mp3AuthorAltMatch = html.match(/class=["']author["'][^>]*>(.*?)<\/[^>]+>/);
+      const mp3AuthorAlt2Match = html.match(/歌手[：:]\s*<[^>]+>(.*?)<\/[^>]+>/);
+      if (mp3AuthorMatch && mp3AuthorMatch[1]) {
+        mp3Author = mp3AuthorMatch[1];
+      } else if (mp3AuthorAltMatch && mp3AuthorAltMatch[1]) {
+        mp3Author = mp3AuthorAltMatch[1].trim();
+      } else if (mp3AuthorAlt2Match && mp3AuthorAlt2Match[1]) {
+        mp3Author = mp3AuthorAlt2Match[1].trim();
+      }
+      
+      // 尝试多种正则匹配mp3_cover
+      const mp3CoverMatch = html.match(/window\.mp3_cover\s*=\s*['"]([^'"]+)['"]/);
+      // 尝试替代模式
+      const mp3CoverAltMatch = html.match(/class=["']cover["'][^>]*src=["']([^'"]+)["']/);
+      const mp3CoverAlt2Match = html.match(/<img[^>]*src=["']([^'"]+(?:jpg|png|gif|jpeg))["'][^>]*class=["'][^"']*cover/);
+      if (mp3CoverMatch && mp3CoverMatch[1]) {
+        mp3Cover = mp3CoverMatch[1];
+      } else if (mp3CoverAltMatch && mp3CoverAltMatch[1]) {
+        mp3Cover = mp3CoverAltMatch[1];
+      } else if (mp3CoverAlt2Match && mp3CoverAlt2Match[1]) {
+        mp3Cover = mp3CoverAlt2Match[1];
+      }
     }
     
     // 如果没有封面图，使用默认封面
@@ -197,22 +206,17 @@ const fetchSongInfo = async (songId) => {
     
     // 如果没有提取到关键信息，输出更详细的信息
     if (!playId) {
-      console.error('无法提取play_id，输出HTML片段用于调试:');
-      console.error(html.substring(0, 1000)); // 输出更长的HTML片段
+      console.error('无法提取play_id，请检查HTML结构');
       throw new Error('无法从详情页获取歌曲信息，请检查控制台输出');
     }
     
-    console.log('正在请求播放链接，playId:', playId);
+    console.log('正在请求歌曲数据...');
     
     // 使用URLSearchParams创建标准的URL编码格式请求体
     const params = new URLSearchParams();
     params.append('id', playId);
     
-    // 记录实际发送的请求体
-    console.log('请求体格式:', params.toString());
-    
-    // 获取真正的歌曲直链 - 方法1：直接fetch POST请求，带no-referrer策略
-    console.log('发送API请求获取播放链接...');
+    // 获取真正的歌曲直链
     const playUrlResponse = await fetch('https://proxy-any.92li.uk/https://www.gequbao.com/api/play-url', {
       method: 'POST',
       headers: {
@@ -225,24 +229,20 @@ const fetchSongInfo = async (songId) => {
       throw new Error(`API请求网络错误: ${error.message}`);
     });
 
-    // 记录原始响应状态
-    console.log('API响应状态:', playUrlResponse.status, playUrlResponse.statusText);
-
     if (!playUrlResponse.ok) {
       throw new Error(`获取播放链接失败: ${playUrlResponse.status}`);
     }
 
     // 获取响应文本
     const responseText = await playUrlResponse.text();
-    console.log('成功获取响应文本:', responseText);
-
+    
     // 解析响应
     let playUrlData;
     try {
       playUrlData = JSON.parse(responseText);
-      console.log('解析的响应数据:', playUrlData);
+      console.log('成功获取播放链接');
     } catch (jsonError) {
-      console.error('JSON解析错误:', jsonError, '原始文本:', responseText);
+      console.error('JSON解析错误:', jsonError);
       throw new Error(`解析API响应失败: ${jsonError.message}`);
     }
 
@@ -252,22 +252,22 @@ const fetchSongInfo = async (songId) => {
     }
     
     if (typeof playUrlData.code === 'undefined') {
-      console.error('API响应没有code字段:', playUrlData);
+      console.error('API返回格式异常: 缺少code字段');
       throw new Error('API返回格式异常: 缺少code字段');
     }
     
     if (playUrlData.code !== 1) {
-      console.error('API返回错误码:', playUrlData.code, 'API错误信息:', playUrlData.msg || '无错误消息');
+      console.error('API返回错误:', playUrlData.msg || '未知错误');
       throw new Error(`API返回错误: ${playUrlData.msg || '未知错误'}`);
     }
     
     if (!playUrlData.data) {
-      console.error('API响应缺少data字段:', playUrlData);
+      console.error('API返回异常: 缺少data字段');
       throw new Error('API返回异常: 缺少data字段');
     }
     
     if (!playUrlData.data.url) {
-      console.error('API响应缺少url字段:', playUrlData.data);
+      console.error('API返回异常: 缺少播放链接');
       throw new Error('API返回异常: 缺少播放链接');
     }
     
@@ -391,7 +391,6 @@ const updatePlayerUI = (songInfo) => {
       // 如果提供了封面URL且不是默认封面，使用渐变效果加载实际封面
       if (songInfo.posterUrl && songInfo.posterUrl !== "./assets/images/none.webp") {
         loadImageWithFade(playerBanner, songInfo.posterUrl, () => {
-          console.log("封面图加载完成并已应用渐变效果");
           playerBanner.setAttribute("alt", `${songInfo.title} 专辑封面`);
         });
       }
