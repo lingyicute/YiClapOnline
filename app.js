@@ -19,6 +19,81 @@ const closePlayer = document.getElementById('close-player');
 const currentYearEl = document.getElementById('current-year');
 
 /**
+ * 主题控制 - 读取li-darkmode cookie并应用相应主题
+ * 0: 浅色主题(默认), 1: 深色主题
+ */
+const themeControl = {
+  // 获取指定名称的cookie值
+  getCookie(name) {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.startsWith(name + '=')) {
+        return cookie.substring(name.length + 1);
+      }
+    }
+    return null;
+  },
+
+  // 设置cookie
+  setCookie(name, value, days = 365) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    const expires = "expires=" + date.toUTCString();
+    document.cookie = name + "=" + value + ";" + expires + ";path=/";
+  },
+
+  // 切换主题
+  toggleTheme() {
+    const darkModeCookie = this.getCookie('li-darkmode');
+    
+    if (darkModeCookie === '1') {
+      // 切换到浅色主题
+      this.setCookie('li-darkmode', '0');
+    } else {
+      // 切换到深色主题
+      this.setCookie('li-darkmode', '1');
+    }
+    
+    this.applyTheme();
+  },
+
+  // 应用主题样式
+  applyTheme() {
+    const darkModeCookie = this.getCookie('li-darkmode');
+    
+    if (darkModeCookie === '1') {
+      // 深色主题
+      document.documentElement.classList.add('dark-theme');
+      document.documentElement.classList.remove('light-theme');
+    } else {
+      // 浅色主题(默认)或cookie不存在
+      document.documentElement.classList.remove('dark-theme');
+      document.documentElement.classList.add('light-theme');
+    }
+  },
+
+  // 初始化主题控制
+  init() {
+    // 添加默认的light-theme类
+    document.documentElement.classList.add('light-theme');
+    
+    // 首次加载应用主题
+    this.applyTheme();
+
+    // 监听storage事件，响应同域下其他页面的cookie变化
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'li-darkmode') {
+        this.applyTheme();
+      }
+    });
+
+    // 定期检查cookie变化（备用方案）
+    setInterval(() => this.applyTheme(), 2000);
+  }
+};
+
+/**
  * 执行搜索
  * @param {string} query - 搜索关键词
  */
@@ -238,6 +313,44 @@ function setCurrentYear() {
 
 // 事件监听器
 document.addEventListener('DOMContentLoaded', () => {
+  // 初始化主题控制
+  themeControl.init();
+  
+  // 添加主题切换按钮事件监听 - 使用新按钮ID
+  const themeToggleBtn = document.getElementById('new-theme-toggle');
+  if (themeToggleBtn) {
+    // 简化：单个点击事件处理程序
+    themeToggleBtn.addEventListener('click', function() {
+      themeControl.toggleTheme();
+      
+      // 根据当前主题更新图标
+      const darkModeCookie = themeControl.getCookie('li-darkmode');
+      const iconElement = this.querySelector('.material-symbols-rounded');
+      
+      if (iconElement) {
+        iconElement.textContent = darkModeCookie === '1' ? 'light_mode' : 'dark_mode';
+      }
+      
+      // 更新按钮背景色（根据主题）
+      const isDarkTheme = darkModeCookie === '1';
+      this.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
+      this.style.color = isDarkTheme ? '#E0E0E0' : '#333';
+    });
+    
+    // 初始化图标状态和按钮背景
+    const darkModeCookie = themeControl.getCookie('li-darkmode');
+    const iconElement = themeToggleBtn.querySelector('.material-symbols-rounded');
+    
+    if (iconElement && darkModeCookie === '1') {
+      iconElement.textContent = 'light_mode';
+      themeToggleBtn.style.backgroundColor = 'rgba(30,30,30,0.8)';
+      themeToggleBtn.style.color = '#E0E0E0';
+    } else {
+      themeToggleBtn.style.backgroundColor = 'rgba(255,255,255,0.8)';
+      themeToggleBtn.style.color = '#333';
+    }
+  }
+  
   // 设置当前年份
   setCurrentYear();
   
@@ -261,7 +374,26 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // 关闭播放器按钮点击事件
   closePlayer.addEventListener('click', () => {
+    // 立即更新主题按钮颜色，避免闪烁
+    const themeToggleBtn = document.getElementById('new-theme-toggle');
+    if (themeToggleBtn) {
+      const darkModeCookie = themeControl.getCookie('li-darkmode');
+      const isDarkTheme = darkModeCookie === '1';
+      
+      // 更新按钮背景色和文字颜色
+      themeToggleBtn.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
+      themeToggleBtn.style.color = isDarkTheme ? '#E0E0E0' : '#333';
+      
+      // 更新图标
+      const iconElement = themeToggleBtn.querySelector('.material-symbols-rounded');
+      if (iconElement) {
+        iconElement.textContent = isDarkTheme ? 'light_mode' : 'dark_mode';
+      }
+    }
+    
+    // 移除播放器激活状态
     playerContainer.classList.remove('active');
+    
     // 延迟一段时间后清空iframe内容，避免音乐继续播放
     setTimeout(() => {
       playerFrame.src = '';
