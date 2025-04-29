@@ -642,7 +642,7 @@ function displayFavorites() {
  * @param {string} id - 歌曲ID
  */
 function playFavorite(id) {
-  const url = `https://proxy-any.92li.uk/https://www.gequbao.com/music/${id}`;
+  const url = `${PROXY_URL}https://www.gequbao.com/music/${id}`;
   playMusic(url);
 }
 
@@ -744,6 +744,30 @@ function preloadPlayerResources() {
   document.body.appendChild(preloadFrame);
 }
 
+/**
+ * 检查是否是ID直接播放格式 (c+数字格式)
+ * @param {string} query - 用户输入的查询字符串
+ * @returns {string|null} - 如果是有效的ID格式，返回ID，否则返回null
+ */
+function checkDirectPlayId(query) {
+  // 检查格式是否为"c+数字"
+  const match = /^c(\d+)$/.exec(query);
+  if (match && match[1]) {
+    return match[1]; // 返回数字部分（歌曲ID）
+  }
+  return null;
+}
+
+/**
+ * 直接通过ID播放歌曲
+ * @param {string} id - 歌曲ID
+ */
+function playMusicById(id) {
+  // 构建歌曲详情页URL
+  const url = `${PROXY_URL}https://www.gequbao.com/music/${id}`;
+  playMusic(url);
+}
+
 // 事件监听器
 document.addEventListener('DOMContentLoaded', () => {
   // 初始化主题控制
@@ -842,10 +866,29 @@ document.addEventListener('DOMContentLoaded', () => {
   // 设置当前年份
   setCurrentYear();
   
+  // 搜索输入框输入事件 - 用于检测ID直接播放格式并更改按钮文本
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.trim();
+    const directPlayId = checkDirectPlayId(query);
+    
+    // 更新按钮文本
+    if (directPlayId) {
+      searchText.textContent = '播放';
+    } else {
+      searchText.textContent = '搜索';
+    }
+  });
+  
   // 搜索按钮点击事件
   searchButton.addEventListener('click', () => {
     const query = searchInput.value.trim();
-    if (query) {
+    if (!query) return;
+    
+    // 检查是否为ID直接播放格式
+    const directPlayId = checkDirectPlayId(query);
+    if (directPlayId) {
+      playMusicById(directPlayId);
+    } else {
       performSearch(query);
     }
   });
@@ -854,7 +897,13 @@ document.addEventListener('DOMContentLoaded', () => {
   searchInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
       const query = searchInput.value.trim();
-      if (query) {
+      if (!query) return;
+      
+      // 检查是否为ID直接播放格式
+      const directPlayId = checkDirectPlayId(query);
+      if (directPlayId) {
+        playMusicById(directPlayId);
+      } else {
         performSearch(query);
       }
     }
