@@ -142,10 +142,11 @@ header {
   height: 100%;
   padding: 0 20px;
   border: none;
-  font-size: 16px;
+  font-size: 18px;
   color: var(--text-color);
   background: transparent;
   outline: none;
+  letter-spacing: 0.5px;
 }
 
 .search-box button {
@@ -157,10 +158,11 @@ header {
   background-color: var(--primary-color);
   color: white;
   border: none;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 500;
   cursor: pointer;
   transition: background-color var(--transition-normal);
+  letter-spacing: 1px;
 }
 
 .search-box button:hover {
@@ -444,12 +446,13 @@ main {
   }
   
   .search-box input {
-    font-size: 14px;
+    font-size: 16px;
+    padding: 0 15px;
   }
   
   .search-box button {
+    font-size: 16px;
     width: 80px;
-    font-size: 14px;
   }
   
   .results-container {
