@@ -4,15 +4,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="./assets/css/style.css">
+  <link rel="icon" href="./assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./player.css">
   <!-- material icon font -->
-  <link rel="stylesheet" href="../assets/material-icons.css">
+  <link rel="stylesheet" href="./assets/material-icons.css">
 </head>
 
-<body>
+<body data-page="player">
   <!-- 加载覆盖层 -->
   <div class="loading-overlay" id="loadingOverlay">
-    <img src="./assets/images/loading.svg" alt="加载中" class="loading-spinner">
+    <img src="./assets/loading.svg" alt="加载中" class="loading-spinner">
     <div class="loading-text">正在加载音乐信息...</div>
   </div>
 
@@ -25,7 +26,7 @@
         <div class="container">
           <div class="music-banner-container">
             <figure class="music-banner">
-              <img src="./assets/images/none.webp" width="800" height="800" alt="默认封面" class="img-cover" data-player-banner>
+              <img src="./assets/none.webp" width="800" height="800" alt="默认封面" class="img-cover" data-player-banner>
             </figure>
           </div>
 
@@ -40,7 +41,7 @@
                 <div class="range-wrapper">
                   <input type="range" step="1" max="60" value="0" class="range" data-range data-seek>
 
-                  <div class="range-fill" data-range-fill></div>
+                  <div class="range-fill"></div>
                 </div>
 
                 <div class="duration-label wrapper">
@@ -82,9 +83,7 @@
     </article>
   </main>
 
-  <script src="../assets/common.js"></script>
-  <script src="../assets/source.js"></script>
-  <script src="./assets/js/script.js"></script>
+  <script src="./app.js"></script>
 
 </body>
 

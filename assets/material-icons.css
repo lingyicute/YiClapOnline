@@ -2,7 +2,7 @@
   font-family: 'Material Symbols Rounded';
   font-style: normal;
   font-weight: 400;
-  src: url('/player/assets/fonts/MaterialSymbols.woff2') format('woff2');
+  src: url('./MaterialSymbols.woff2') format('woff2');
 }
 
 .material-symbols-rounded {
