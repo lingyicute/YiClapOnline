@@ -39,26 +39,18 @@
 </head>
 <body>
   <!-- 右上角按钮 -->
-  <button id="favorites-btn" style="position:fixed; top:20px; right:70px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.8); color:var(--text-color); border:1px solid rgba(0,0,0,0.1); cursor:pointer; z-index:999; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 10px rgba(0,0,0,0.1); transition:all 0.3s ease;" 
-  onmouseover="this.style.backgroundColor='#4285F4'; this.style.color='white';" 
-  onmouseout="this.style.backgroundColor=document.documentElement.classList.contains('dark-theme') ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)'; this.style.color=document.documentElement.classList.contains('dark-theme') ? '#E0E0E0' : '#333';">
-    <span class="material-symbols-rounded">favorite_border</span>
-  </button>
-  
-  <button id="new-theme-toggle" style="position:fixed; top:20px; right:20px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,0.8); color:var(--text-color); border:1px solid rgba(0,0,0,0.1); cursor:pointer; z-index:999; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 10px rgba(0,0,0,0.1); transition:all 0.3s ease;" 
-  onmouseover="this.style.backgroundColor='#4285F4'; this.style.color='white';" 
-  onmouseout="this.style.backgroundColor=document.documentElement.classList.contains('dark-theme') ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)'; this.style.color=document.documentElement.classList.contains('dark-theme') ? '#E0E0E0' : '#333';">
-    <span class="material-symbols-rounded">dark_mode</span>
-  </button>
+  <div class="top-actions">
+    <button id="favorites-btn" class="top-action" type="button" aria-label="查看收藏">
+      <span class="material-symbols-rounded">favorite_border</span>
+    </button>
+    <button id="theme-toggle" class="top-action" type="button" aria-label="切换深浅主题">
+      <span class="material-symbols-rounded">dark_mode</span>
+    </button>
+  </div>
   
   <!-- 主页加载覆盖层 -->
   <div id="main-loading-overlay" class="main-loading-overlay">
     <img src="./player/assets/images/loading.svg" alt="加载中...">
-  </div>
-  
-  <!-- 主题切换按钮 - 使用div代替button -->
-  <div id="theme-toggle" class="theme-toggle" style="display:none;">
-    <span class="material-symbols-rounded">dark_mode</span>
   </div>
   
   <div class="container">
@@ -120,53 +112,13 @@
     </footer>
 
     <div id="player-container" class="player-container">
-      <iframe id="player-frame" src="" frameborder="0"></iframe>
+      <iframe id="player-frame" src="" title="音乐播放器"></iframe>
       <button id="close-player" class="close-player">
         <span class="material-symbols-rounded">close</span>
       </button>
     </div>
   </div>
 
-  <!-- 覆盖层处理脚本 -->
-  <script>
-    (function() {
-      // 文件已缓冲完成的简单检查
-      function checkAndHideOverlay() {
-        // 确保覆盖层至少显示300ms
-        setTimeout(function() {
-          const overlay = document.getElementById('main-loading-overlay');
-          if (!overlay) {
-            console.error('找不到覆盖层元素');
-            return;
-          }
-          
-          overlay.style.opacity = '0';
-          
-          setTimeout(function() {
-            if (overlay && overlay.parentNode) {
-              overlay.parentNode.removeChild(overlay);
-            }
-          }, 500);
-        }, 300);
-      }
-      
-      // 最长加载时间为8秒
-      const maxLoadingTime = 3000;
-      const loadingTimeout = setTimeout(function() {
-        console.warn('加载超时，强制隐藏覆盖层');
-        checkAndHideOverlay();
-      }, maxLoadingTime);
-      
-      // 当页面完全加载后
-      window.addEventListener('load', function() {
-        clearTimeout(loadingTimeout); // 清除超时定时器
-        checkAndHideOverlay();
-      });
-    })();
-  </script>
-  
-  <script src="./app.js"></script>
-  
   <!-- 更新提示弹窗 -->
   <div class="update-modal-overlay" id="updateOverlay"></div>
   <div class="update-modal" id="updateModal">
@@ -179,5 +131,7 @@
       <button id="refreshButton">刷新</button>
     </div>
   </div>
+
+  <script src="./app.js"></script>
 </body>
 </html> 

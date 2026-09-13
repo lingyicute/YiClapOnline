@@ -1,20 +1,55 @@
 'use strict';
 
-/**
- * 收藏功能 - 使用cookie保存收藏的歌曲
- */
+/** Cookie 读写工具 */
+const cookieStore = {
+  get(name) {
+    const prefix = `${name}=`;
+    const cookie = document.cookie
+      .split(';')
+      .map(item => item.trim())
+      .find(item => item.startsWith(prefix));
+    return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+  },
+
+  set(name, value, days = 365) {
+    const expires = new Date(Date.now() + days * 86400000).toUTCString();
+    const secure = location.protocol === 'https:' ? ';Secure' : '';
+    document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax${secure}`;
+  },
+
+  remove(name) {
+    this.set(name, '', -1);
+  }
+};
+
+/** 收藏功能；首次读取时自动迁移旧 Cookie。 */
+const FAVORITES_KEY = 'li-favorites';
 const favoriteControl = {
-  // 获取收藏列表
   getFavorites() {
-    const favCookie = this.getCookie('li-favorites');
-    if (!favCookie) return [];
-    
     try {
-      return JSON.parse(favCookie);
+      const storedFavorites = localStorage.getItem(FAVORITES_KEY);
+      if (storedFavorites !== null) {
+        const favorites = JSON.parse(storedFavorites);
+        return Array.isArray(favorites) ? favorites : [];
+      }
+
+      const legacyFavorites = cookieStore.get(FAVORITES_KEY);
+      if (legacyFavorites === null) return [];
+
+      const favorites = JSON.parse(legacyFavorites);
+      if (!Array.isArray(favorites)) return [];
+
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+      cookieStore.remove(FAVORITES_KEY);
+      return favorites;
     } catch (error) {
-      console.error('解析收藏列表失败:', error);
+      console.error('读取收藏列表失败:', error);
       return [];
     }
+  },
+
+  saveFavorites(favorites) {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
   },
   
   // 添加收藏
@@ -30,8 +65,7 @@ const favoriteControl = {
     // 添加到收藏列表
     favorites.push({ id: songId, title, artist });
     
-    // 保存到cookie
-    this.setCookie('li-favorites', JSON.stringify(favorites));
+    this.saveFavorites(favorites);
     return true;
   },
   
@@ -47,8 +81,7 @@ const favoriteControl = {
     
     favorites.splice(existingIndex, 1);
     
-    // 保存到cookie
-    this.setCookie('li-favorites', JSON.stringify(favorites));
+    this.saveFavorites(favorites);
     return true;
   },
   
@@ -58,27 +91,6 @@ const favoriteControl = {
     
     const favorites = this.getFavorites();
     return favorites.some(item => item.id === songId);
-  },
-  
-  // 获取指定名称的cookie值
-  getCookie(name) {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith(name + '=')) {
-        return decodeURIComponent(cookie.substring(name.length + 1));
-      }
-    }
-    return null;
-  },
-
-  // 设置cookie
-  setCookie(name, value, days = 365) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    const expires = "expires=" + date.toUTCString();
-    const secure = location.protocol === 'https:' ? '; secure' : '';
-    document.cookie = name + "=" + encodeURIComponent(value) + ";" + expires + ";path=/;SameSite=Lax" + secure;
   },
   
   // 更新收藏按钮UI
@@ -101,79 +113,28 @@ const favoriteControl = {
   }
 };
 
-/**
- * 主题控制 - 读取li-darkmode cookie并应用相应主题
- * 0: 浅色主题(默认), 1: 深色主题
- */
+/** 主题控制 */
 const themeControl = {
-  // 获取指定名称的cookie值
-  getCookie(name) {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith(name + '=')) {
-        return cookie.substring(name.length + 1);
-      }
-    }
-    return null;
+  isDark() {
+    return cookieStore.get('li-darkmode') === '1';
   },
 
-  // 设置cookie
-  setCookie(name, value, days = 365) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    const expires = "expires=" + date.toUTCString();
-    const secure = location.protocol === 'https:' ? '; secure' : '';
-    document.cookie = name + "=" + value + ";" + expires + ";path=/;SameSite=Lax" + secure;
-  },
-
-  // 切换主题
   toggleTheme() {
-    const darkModeCookie = this.getCookie('li-darkmode');
-    
-    if (darkModeCookie === '1') {
-      // 切换到浅色主题
-      this.setCookie('li-darkmode', '0');
-    } else {
-      // 切换到深色主题
-      this.setCookie('li-darkmode', '1');
-    }
-    
+    cookieStore.set('li-darkmode', this.isDark() ? '0' : '1');
     this.applyTheme();
   },
 
-  // 应用主题样式
   applyTheme() {
-    const darkModeCookie = this.getCookie('li-darkmode');
-    
-    if (darkModeCookie === '1') {
-      // 深色主题
-      document.documentElement.classList.add('dark-theme');
-      document.documentElement.classList.remove('light-theme');
-    } else {
-      // 浅色主题(默认)或cookie不存在
-      document.documentElement.classList.remove('dark-theme');
-      document.documentElement.classList.add('light-theme');
-    }
+    const isDark = this.isDark();
+    document.documentElement.classList.toggle('dark-theme', isDark);
+    document.documentElement.classList.toggle('light-theme', !isDark);
+
+    const icon = document.querySelector('[data-theme-toggle] .material-symbols-rounded');
+    if (icon) icon.textContent = isDark ? 'light_mode' : 'dark_mode';
   },
 
-  // 初始化主题控制
   init() {
-    // 添加默认的light-theme类
-    document.documentElement.classList.add('light-theme');
-    
-    // 首次加载应用主题
     this.applyTheme();
-
-    // 监听storage事件，响应同域下其他页面的cookie变化
-    window.addEventListener('storage', (event) => {
-      if (event.key === 'li-darkmode') {
-        this.applyTheme();
-      }
-    });
-
-    // 定期检查cookie变化（备用方案）
-    setInterval(() => this.applyTheme(), 2000);
   }
 };
 
@@ -195,7 +156,6 @@ const fetchSongInfo = async (songId) => {
     const detailUrl = songId;
     
     // 获取歌曲详情页 - 使用简单请求避免CORS预检
-    console.log('正在发送详情页请求...');
     const response = await fetch(detailUrl).catch(error => {
       console.error('详情页请求网络错误:', error);
       throw new Error(`详情页请求失败: ${error.message}`);
@@ -207,13 +167,6 @@ const fetchSongInfo = async (songId) => {
     }
     
     const html = await response.text();
-    
-    // 输出HTML结构以便于分析
-    console.log('HTML文档结构检查:', 
-      (html.includes('window.mp3_id') ? '包含window.mp3_id' : '不包含window.mp3_id') + ', ' +
-      (html.includes('window.play_id') ? '包含window.play_id' : '不包含window.play_id') + ', ' + 
-      (html.includes('window.appData') ? '包含window.appData' : '不包含window.appData')
-    );
     
     // 从HTML中提取关键信息
     let mp3Id = '', playId = '', mp3Title = '', mp3Author = '', mp3Cover = '';
@@ -228,7 +181,6 @@ const fetchSongInfo = async (songId) => {
         mp3Title = appData.mp3_title || '';
         mp3Author = appData.mp3_author || '';
         mp3Cover = appData.mp3_cover || '';
-        console.log('成功从appData提取数据');
       } catch (e) {
         console.error('解析appData失败:', e);
       }
@@ -236,7 +188,6 @@ const fetchSongInfo = async (songId) => {
     
     // 如果appData中没有提取到数据，则使用原有的提取逻辑作为备用
     if (!playId) {
-      console.log('使用备用方法提取数据');
       // 尝试多种正则匹配mp3_id
       const mp3IdMatch = html.match(/window\.mp3_id\s*=\s*['"]([^'"]+)['"]/);
       // 尝试替代模式
@@ -303,7 +254,6 @@ const fetchSongInfo = async (songId) => {
     // 如果没有封面图，使用默认封面
     if (!mp3Cover) {
       mp3Cover = './assets/images/none.webp';
-      console.log('使用默认封面图');
     }
     
     // 如果没有提取到关键信息，输出更详细的信息
@@ -312,7 +262,6 @@ const fetchSongInfo = async (songId) => {
       throw new Error('无法从详情页获取歌曲信息，请检查控制台输出');
     }
     
-    console.log('正在请求歌曲数据...');
     
     // 使用URLSearchParams创建标准的URL编码格式请求体
     const params = new URLSearchParams();
@@ -342,7 +291,6 @@ const fetchSongInfo = async (songId) => {
     let playUrlData;
     try {
       playUrlData = JSON.parse(responseText);
-      console.log('成功获取播放链接');
     } catch (jsonError) {
       console.error('JSON解析错误:', jsonError);
       throw new Error(`解析API响应失败: ${jsonError.message}`);
@@ -403,7 +351,6 @@ const fetchSongInfo = async (songId) => {
       title: mp3Title,
       artist: mp3Author,
       posterUrl: mp3Cover,
-      backgroundImage: mp3Cover,
       musicPath: mp3Url,
     };
   } catch (error) {
@@ -509,10 +456,8 @@ const updatePlayerUI = (songInfo) => {
       }
     }
     
-    // 设置背景图像
-    if (songInfo.backgroundImage) {
-      document.body.style.backgroundImage = `url(${songInfo.backgroundImage})`;
-    }
+    // 封面同时作为模糊背景
+    document.body.style.backgroundImage = `url(${songInfo.posterUrl})`;
   } catch (error) {
     console.error('更新播放器UI时出错:', error);
     
@@ -567,7 +512,6 @@ const initMusicPlayer = async (songId) => {
       return;
     }
 
-    console.log('正在获取歌曲信息，URL:', songId);
 
     // 获取歌曲信息
     const songInfo = await fetchSongInfo(songId);
@@ -611,17 +555,6 @@ const initMusicPlayer = async (songId) => {
   }
 };
 
-/**
- * 为多个元素添加相同的事件监听器
- */
-const addEventOnElements = function (elements, eventType, callback) {
-  if (!elements || elements.length === 0) return;
-  
-  for (let i = 0, len = elements.length; i < len; i++) {
-    elements[i].addEventListener(eventType, callback);
-  }
-}
-
 // 初始化音频源
 const audioSource = new Audio();
 
@@ -631,18 +564,14 @@ const audioSource = new Audio();
 
 // 播放/暂停按钮
 const playBtn = document.querySelector("[data-play-btn]");
-let playInterval;
-
 const playMusic = function () {
   try {
     if (audioSource.paused) {
       audioSource.play().catch(e => console.error('Error playing audio:', e));
       if (playBtn) playBtn.classList.add("active");
-      playInterval = setInterval(updateRunningTime, 500);
     } else {
       audioSource.pause();
       if (playBtn) playBtn.classList.remove("active");
-      clearInterval(playInterval);
     }
   } catch (error) {
     console.error('Error in playMusic function:', error);
@@ -726,377 +655,83 @@ const updateRunningTime = function () {
     if (playerSeekRange && playerRunningTime) {
       playerSeekRange.value = audioSource.currentTime;
       playerRunningTime.textContent = getTimecode(audioSource.currentTime);
-      updateRangeFill();
+      updateRangeFill(playerSeekRange);
     }
-    isMusicEnd();
   } catch (error) {
     console.error('Error updating running time:', error);
   }
 }
 
 // 更新进度条填充
-const ranges = document.querySelectorAll("[data-range]");
-const rangeFills = document.querySelectorAll("[data-range-fill]");
-
-const updateRangeFill = function () {
-  try {
-    let element = this;
-    if (!element && ranges && ranges.length > 0) {
-      // 使用当前正在更新的元素
-      element = ranges[0];
-    }
-    
-    if (element) {
-      // 找到对应的rangeFill元素
-      let rangeFill;
-      if (this) {
-        // 如果是由事件触发，查找相邻的rangeFill元素
-        rangeFill = this.nextElementSibling;
-      } else {
-        // 否则更新所有range元素
-        for (let i = 0; i < ranges.length; i++) {
-          const range = ranges[i];
-          const fill = rangeFills[i];
-          if (fill) {
-            const rangeValue = (range.value / range.max) * 100;
-            fill.style.width = `${rangeValue}%`;
-          }
-        }
-        return;
-      }
-      
-      if (rangeFill) {
-        const rangeValue = (element.value / element.max) * 100;
-        rangeFill.style.width = `${rangeValue}%`;
-      }
-    }
-  } catch (error) {
-    console.error('Error updating range fill:', error);
-  }
-}
-
-addEventOnElements(ranges, "input", updateRangeFill);
+const updateRangeFill = (range, fill = range?.nextElementSibling) => {
+  if (!range || !fill) return;
+  const maximum = Number(range.max) || 1;
+  fill.style.width = `${(Number(range.value) / maximum) * 100}%`;
+};
 
 // 拖动进度条改变播放位置
-const seek = function () {
-  try {
-    if (playerSeekRange && playerRunningTime) {
-      audioSource.currentTime = playerSeekRange.value;
-      playerRunningTime.textContent = getTimecode(playerSeekRange.value);
-    }
-  } catch (error) {
-    console.error('Error seeking:', error);
-  }
-}
-
 if (playerSeekRange) {
-  playerSeekRange.addEventListener("input", seek);
+  playerSeekRange.addEventListener('input', () => {
+    audioSource.currentTime = Number(playerSeekRange.value);
+    playerRunningTime.textContent = getTimecode(audioSource.currentTime);
+    updateRangeFill(playerSeekRange);
+  });
 }
 
-// 检查音乐是否播放完毕
-const isMusicEnd = function () {
-  try {
-    if (audioSource.ended) {
-      if (playBtn) playBtn.classList.remove("active");
-      clearInterval(playInterval);
-      if (playerSeekRange) {
-        playerSeekRange.value = 0;
-        if (playerRunningTime) {
-          playerRunningTime.textContent = getTimecode(0);
-        }
-        updateRangeFill();
-      }
-    }
-  } catch (error) {
-    console.error('Error checking if music ended:', error);
+// 使用原生音频事件更新进度，避免额外的轮询计时器
+const resetPlaybackUI = () => {
+  playBtn?.classList.remove('active');
+  if (playerSeekRange) {
+    playerSeekRange.value = 0;
+    if (playerRunningTime) playerRunningTime.textContent = getTimecode(0);
+    updateRangeFill(playerSeekRange);
   }
-}
+};
 
-/**
- * 音量控制
- */
+audioSource.addEventListener('timeupdate', updateRunningTime);
+audioSource.addEventListener('ended', resetPlaybackUI);
 
-// 全局音量控制元素引用
-let volumeRange;
-let volumeBtn;
-let muteState = false;
+/** 音量控制 */
+const volumeRange = document.querySelector('[data-volume]');
+const volumeBtn = document.querySelector('[data-volume-btn]');
+let previousVolume = 1;
 
-const changeVolume = function () {
-  try {
-    // 只在宽屏幕上执行
-    if (window.innerWidth < 992) return;
-    
-    if (volumeRange && volumeBtn) {
-      audioSource.volume = volumeRange.value;
-      
-      if (audioSource.volume <= 0) {
-        muteState = true;
-        volumeBtn.children[0].textContent = "volume_off";
-      } else {
-        muteState = false;
-        volumeBtn.children[0].textContent = "volume_up";
-      }
-    }
-  } catch (error) {
-    console.error('Error changing volume:', error);
-  }
-}
+const updateVolumeUI = () => {
+  if (!volumeRange || !volumeBtn) return;
+  const volume = Number(volumeRange.value);
+  audioSource.volume = volume;
+  volumeBtn.querySelector('.material-symbols-rounded').textContent = volume === 0 ? 'volume_off' : 'volume_up';
+  updateRangeFill(volumeRange, volumeRange.nextElementSibling);
+};
 
-const muteVolume = function () {
-  try {
-    // 只在宽屏幕上执行
-    if (window.innerWidth < 992) return;
-    
-    if (volumeBtn && volumeRange) {
-      if (!muteState) {
-        muteState = true;
-        volumeBtn.children[0].textContent = "volume_off";
-        audioSource.volume = 0;
-        volumeRange.value = 0;
-      } else {
-        muteState = false;
-        volumeBtn.children[0].textContent = "volume_up";
-        audioSource.volume = 1;
-        volumeRange.value = 1;
-      }
-      
-      // 直接更新填充效果
-      const rangeValue = (volumeRange.value / volumeRange.max) * 100;
-      const rangeFill = volumeRange.nextElementSibling;
-      if (rangeFill) {
-        rangeFill.style.width = `${rangeValue}%`;
-      }
-    }
-  } catch (error) {
-    console.error('Error toggling mute:', error);
-  }
-}
+volumeRange?.addEventListener('input', () => {
+  if (Number(volumeRange.value) > 0) previousVolume = Number(volumeRange.value);
+  updateVolumeUI();
+});
 
-/**
- * 修复音量控制器样式问题
- * 通过在指定容器中创建音量控制器元素
- * 只在宽屏(992px及以上)显示
- */
-const fixVolumeSliderStyle = function() {
-  const volumeContainer = document.getElementById('volume-container');
-  if (!volumeContainer) return;
-  
-  // 清空现有内容
-  volumeContainer.innerHTML = '';
-  
-  // 只在宽屏幕上创建音量控制器
-  if (window.innerWidth >= 992) {
-    // 创建新的容器
-    const newVolumeContainer = document.createElement('div');
-    newVolumeContainer.className = 'volume';
-    newVolumeContainer.style.cssText = 'background: none !important; background-color: transparent !important;';
-    
-    // 创建新的按钮
-    const newButton = document.createElement('button');
-    newButton.className = 'btn-icon';
-    newButton.dataset.volumeBtn = '';
-    newButton.innerHTML = `<span class="material-symbols-rounded">volume_up</span>`;
-    
-    // 创建新的滑块容器
-    const newWrapper = document.createElement('div');
-    newWrapper.className = 'range-wrapper';
-    newWrapper.style.cssText = 'background: none !important; background-color: transparent !important;';
-    
-    // 创建新的滑块
-    const newSlider = document.createElement('input');
-    newSlider.type = 'range';
-    newSlider.step = '0.05';
-    newSlider.max = '1';
-    newSlider.value = '1'; // 默认音量为最大
-    newSlider.className = 'range volume-slider';
-    newSlider.dataset.range = '';
-    newSlider.dataset.volume = '';
-    newSlider.style.cssText = 'background: none !important; background-color: transparent !important; -webkit-appearance: none !important; appearance: none !important;';
-    
-    // 创建填充元素
-    const newFill = document.createElement('div');
-    newFill.className = 'range-fill';
-    newFill.dataset.rangeFill = '';
-    
-    // 组装新的音量控制器
-    newWrapper.appendChild(newSlider);
-    newWrapper.appendChild(newFill);
-    newVolumeContainer.appendChild(newButton);
-    newVolumeContainer.appendChild(newWrapper);
-    
-    // 将音量控制器添加到指定容器
-    volumeContainer.appendChild(newVolumeContainer);
-    
-    // 更新全局变量引用
-    volumeRange = newSlider;
-    volumeBtn = newButton;
-    
-    // 设置初始音频音量
-    if (audioSource) {
-      audioSource.volume = newSlider.value;
-    }
-    
-    // 添加事件监听器
-    newSlider.addEventListener('input', function() {
-      changeVolume();
-      // 直接更新此滑块的填充效果
-      const rangeValue = (this.value / this.max) * 100;
-      newFill.style.width = `${rangeValue}%`;
-    });
-    newButton.addEventListener('click', muteVolume);
-    
-    // 添加必要的CSS样式
-    const styleId = 'volume-slider-style';
-    let style = document.getElementById(styleId);
-    
-    if (!style) {
-      style = document.createElement('style');
-      style.id = styleId;
-      style.textContent = `
-        .volume {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          background-color: transparent !important;
-          z-index: 5;
-        }
-        
-        @media (min-width: 992px) {
-          .volume {
-            margin-block-start: -30px;
-            width: 150px;
-            min-width: 150px;
-            padding: 4px 8px;
-            border-radius: var(--radius-pill);
-            margin-right: -8px;
-          }
-          
-          .volume .btn-icon {
-            flex-shrink: 0;
-            margin-right: 4px;
-            width: 36px;
-            height: 36px;
-          }
-          
-          .volume .range-wrapper {
-            width: 100%;
-            max-width: 100px;
-          }
-        }
-        
-        @media (max-width: 991px) {
-          .volume {
-            display: none !important;
-          }
-        }
-        
-        .volume input[type="range"]::-webkit-slider-runnable-track {
-          appearance: none !important;
-          background-color: var(--surface-variant) !important;
-          height: 6px !important;
-          border-radius: var(--radius-pill) !important;
-          border: none !important;
-          outline: none !important;
-        }
-        
-        .volume input[type="range"]::-moz-range-track {
-          appearance: none !important;
-          background-color: var(--surface-variant) !important;
-          height: 6px !important;
-          border-radius: var(--radius-pill) !important;
-          border: none !important;
-        }
-        
-        .volume input[type="range"]::-webkit-slider-thumb {
-          appearance: none !important;
-          -webkit-appearance: none !important;
-          background-color: var(--primary) !important;
-          width: 16px !important;
-          height: 16px !important;
-          margin-block-start: -5px !important;
-          border-radius: var(--radius-pill) !important;
-          border: none !important;
-          box-shadow: none !important;
-        }
-        
-        .volume input[type="range"]::-moz-range-thumb {
-          appearance: none !important;
-          background-color: var(--primary) !important;
-          width: 16px !important;
-          height: 16px !important;
-          border-radius: var(--radius-pill) !important;
-          border: none !important;
-          box-shadow: none !important;
-        }
-        
-        /* 深色主题下的音量控制器样式 */
-        :root.dark-theme .volume input[type="range"]::-webkit-slider-thumb {
-          background-color: var(--light-sky-blue) !important;
-        }
-        
-        :root.dark-theme .volume input[type="range"]::-moz-range-thumb {
-          background-color: var(--light-sky-blue) !important;
-        }
-        
-        /* 浅色主题下的音量控制器样式 */
-        :root.light-theme .volume input[type="range"]::-webkit-slider-thumb {
-          background-color: var(--light-sky-blue) !important;
-        }
-        
-        :root.light-theme .volume input[type="range"]::-moz-range-thumb {
-          background-color: var(--light-sky-blue) !important;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-    
-    // 初始化滑块填充效果 - 确保初始状态正确
-    const initialValue = (newSlider.value / newSlider.max) * 100;
-    newFill.style.width = `${initialValue}%`;
+volumeBtn?.addEventListener('click', () => {
+  if (Number(volumeRange.value) > 0) {
+    previousVolume = Number(volumeRange.value);
+    volumeRange.value = 0;
   } else {
-    // 非宽屏下，设置全局变量为null
-    volumeRange = null;
-    volumeBtn = null;
+    volumeRange.value = previousVolume || 1;
   }
-}
+  updateVolumeUI();
+});
 
-// 添加窗口大小改变事件监听器，以响应屏幕大小变化
-window.addEventListener('resize', fixVolumeSliderStyle);
+updateVolumeUI();
 
 // 初始化播放器
 window.addEventListener('DOMContentLoaded', () => {
   // 初始化主题控制
   themeControl.init();
   
-  // 添加主题切换按钮事件监听
   const themeToggleBtn = document.querySelector('[data-theme-toggle]');
-  if (themeToggleBtn) {
-    themeToggleBtn.addEventListener('click', () => {
-      themeControl.toggleTheme();
-      
-      // 根据当前主题更新图标
-      const darkModeCookie = themeControl.getCookie('li-darkmode');
-      const iconElement = themeToggleBtn.querySelector('.material-symbols-rounded');
-      
-      if (iconElement) {
-        iconElement.textContent = darkModeCookie === '1' ? 'light_mode' : 'dark_mode';
-      }
-    });
-    
-    // 初始化图标状态
-    const darkModeCookie = themeControl.getCookie('li-darkmode');
-    const iconElement = themeToggleBtn.querySelector('.material-symbols-rounded');
-    
-    if (iconElement && darkModeCookie === '1') {
-      iconElement.textContent = 'light_mode';
-    }
-  }
+  themeToggleBtn?.addEventListener('click', () => themeControl.toggleTheme());
   
   // 初始化音乐播放器
   initMusicPlayer();
-  
-  // 修复音量控制器样式
-  fixVolumeSliderStyle();
+
 
   // 收藏按钮事件
   const favoriteBtn = document.querySelector("[data-favorite]");
