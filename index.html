@@ -9,7 +9,7 @@
   <!-- 图标 - 本地托管 -->
   <link rel="stylesheet" href="./assets/material-icons.css">
 </head>
-<body>
+<body data-page="main">
   <!-- 右上角按钮 -->
   <button id="favorites-btn" class="top-btn">
     <span class="material-symbols-rounded">favorite_border</span>
@@ -21,7 +21,7 @@
 
   <!-- 主页加载覆盖层 -->
   <div id="main-loading-overlay" class="main-loading-overlay">
-    <img src="./player/assets/images/loading.svg" alt="加载中...">
+    <img src="./assets/loading.svg" alt="加载中...">
   </div>
 
   <div class="container">
@@ -82,7 +82,7 @@
     </footer>
 
     <div id="player-container" class="player-container">
-      <iframe id="player-frame" src="" frameborder="0"></iframe>
+      <iframe id="player-frame" src=""></iframe>
       <button id="close-player" class="close-player">
         <span class="material-symbols-rounded">close</span>
       </button>
@@ -116,8 +116,6 @@
     })();
   </script>
 
-  <script src="./assets/common.js"></script>
-  <script src="./assets/source.js"></script>
   <script src="./app.js"></script>
 
   <!-- 更新提示弹窗 -->
@@ -125,7 +123,7 @@
   <div class="update-modal" id="updateModal">
     <div class="update-modal-title">发现新版本</div>
     <div class="update-modal-time" id="updateTime"></div>
-    <div class="update-modal-content" id="updateContent">
+    <div class="update-modal-content">
       <ul id="updateList"></ul>
     </div>
     <div class="update-modal-button">

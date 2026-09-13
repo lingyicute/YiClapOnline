@@ -1,7 +1,7 @@
 /* 自定义字体 */
 @font-face {
   font-family: 'Pacifico';
-  src: url('./player/assets/fonts/pacifico.woff2') format('woff2');
+  src: url('./assets/pacifico.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
   font-display: block;
@@ -9,7 +9,7 @@
 
 @font-face {
   font-family: 'Nebulove';
-  src: url('./player/assets/fonts/Nebulove.woff2') format('woff2');
+  src: url('./assets/Nebulove.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
