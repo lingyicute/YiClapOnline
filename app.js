@@ -4,42 +4,56 @@
 const PROXY_URL = 'https://proxy-any.92li.uk/';
 const SEARCH_BASE_URL = 'https://www.gequbao.com/s/';
 
-/**
- * 收藏功能 - 使用cookie保存收藏的歌曲
- */
+/** Cookie 读写工具 */
+const cookieStore = {
+  get(name) {
+    const prefix = `${name}=`;
+    const cookie = document.cookie
+      .split(';')
+      .map(item => item.trim())
+      .find(item => item.startsWith(prefix));
+    return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+  },
+
+  set(name, value, days = 365) {
+    const expires = new Date(Date.now() + days * 86400000).toUTCString();
+    const secure = location.protocol === 'https:' ? ';Secure' : '';
+    document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax${secure}`;
+  },
+
+  remove(name) {
+    this.set(name, '', -1);
+  }
+};
+
+/** 收藏数据访问；首次读取时自动迁移旧 Cookie。 */
+const FAVORITES_KEY = 'li-favorites';
 const favoriteControl = {
-  // 获取收藏列表
   getFavorites() {
-    const favCookie = this.getCookie('li-favorites');
-    if (!favCookie) return [];
-    
     try {
-      return JSON.parse(favCookie);
+      const storedFavorites = localStorage.getItem(FAVORITES_KEY);
+      if (storedFavorites !== null) {
+        const favorites = JSON.parse(storedFavorites);
+        return Array.isArray(favorites) ? favorites : [];
+      }
+
+      const legacyFavorites = cookieStore.get(FAVORITES_KEY);
+      if (legacyFavorites === null) return [];
+
+      const favorites = JSON.parse(legacyFavorites);
+      if (!Array.isArray(favorites)) return [];
+
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+      cookieStore.remove(FAVORITES_KEY);
+      return favorites;
     } catch (error) {
-      console.error('解析收藏列表失败:', error);
+      console.error('读取收藏列表失败:', error);
       return [];
     }
   },
-  
-  // 获取指定名称的cookie值
-  getCookie(name) {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith(name + '=')) {
-        return decodeURIComponent(cookie.substring(name.length + 1));
-      }
-    }
-    return null;
-  },
 
-  // 设置cookie
-  setCookie(name, value, days = 365) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    const expires = "expires=" + date.toUTCString();
-    const secure = location.protocol === 'https:' ? '; secure' : '';
-    document.cookie = name + "=" + encodeURIComponent(value) + ";" + expires + ";path=/;SameSite=Lax" + secure;
+  saveFavorites(favorites) {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
   }
 };
 
@@ -60,87 +74,28 @@ const favoritesBtn = document.getElementById('favorites-btn');
 const favoritesContainer = document.getElementById('favorites-container');
 const favoritesList = document.getElementById('favorites-list');
 
-/**
- * 主题控制 - 读取li-darkmode cookie并应用相应主题
- * 0: 浅色主题(默认), 1: 深色主题
- */
+/** 主题控制 */
 const themeControl = {
-  // 获取指定名称的cookie值
-  getCookie(name) {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.startsWith(name + '=')) {
-        return cookie.substring(name.length + 1);
-      }
-    }
-    return null;
+  isDark() {
+    return cookieStore.get('li-darkmode') === '1';
   },
 
-  // 设置cookie
-  setCookie(name, value, days = 365) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    const expires = "expires=" + date.toUTCString();
-    const secure = location.protocol === 'https:' ? '; secure' : '';
-    document.cookie = name + "=" + value + ";" + expires + ";path=/;SameSite=Lax" + secure;
-  },
-
-  // 切换主题
   toggleTheme() {
-    const darkModeCookie = this.getCookie('li-darkmode');
-    
-    if (darkModeCookie === '1') {
-      // 切换到浅色主题
-      this.setCookie('li-darkmode', '0');
-    } else {
-      // 切换到深色主题
-      this.setCookie('li-darkmode', '1');
-    }
-    
+    cookieStore.set('li-darkmode', this.isDark() ? '0' : '1');
     this.applyTheme();
   },
 
-  // 应用主题样式
   applyTheme() {
-    const darkModeCookie = this.getCookie('li-darkmode');
-    
-    if (darkModeCookie === '1') {
-      // 深色主题
-      document.documentElement.classList.add('dark-theme');
-      document.documentElement.classList.remove('light-theme');
-    } else {
-      // 浅色主题(默认)或cookie不存在
-      document.documentElement.classList.remove('dark-theme');
-      document.documentElement.classList.add('light-theme');
-    }
-    
-    // 更新收藏按钮颜色
-    const favoritesBtn = document.getElementById('favorites-btn');
-    if (favoritesBtn) {
-      const isDarkTheme = darkModeCookie === '1';
-      favoritesBtn.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
-      favoritesBtn.style.color = isDarkTheme ? '#E0E0E0' : '#333';
-    }
+    const isDark = this.isDark();
+    document.documentElement.classList.toggle('dark-theme', isDark);
+    document.documentElement.classList.toggle('light-theme', !isDark);
+
+    const icon = document.querySelector('#theme-toggle .material-symbols-rounded');
+    if (icon) icon.textContent = isDark ? 'light_mode' : 'dark_mode';
   },
 
-  // 初始化主题控制
   init() {
-    // 添加默认的light-theme类
-    document.documentElement.classList.add('light-theme');
-    
-    // 首次加载应用主题
     this.applyTheme();
-
-    // 监听storage事件，响应同域下其他页面的cookie变化
-    window.addEventListener('storage', (event) => {
-      if (event.key === 'li-darkmode') {
-        this.applyTheme();
-      }
-    });
-
-    // 定期检查cookie变化（备用方案）
-    setInterval(() => this.applyTheme(), 2000);
   }
 };
 
@@ -150,12 +105,12 @@ const themeControl = {
 const updateControl = {
   // 获取本地保存的版本号
   getLocalVersion() {
-    return themeControl.getCookie('li-version') || '0';
+    return cookieStore.get('li-version') || '0';
   },
   
   // 保存版本号到本地
   saveLocalVersion(version) {
-    themeControl.setCookie('li-version', version, 365);
+    cookieStore.set('li-version', version, 365);
   },
   
   // 检查更新
@@ -173,8 +128,6 @@ const updateControl = {
       
       const updateData = await response.json();
       const remoteVersion = updateData.version;
-      
-      console.log('版本检查 - 本地:', localVersion, '远程:', remoteVersion);
       
       // 如果远程版本比本地版本新，显示更新提示
       if (remoteVersion > localVersion) {
@@ -282,49 +235,23 @@ const containerControl = {
     }, 10);
   },
   
-  // 隐藏所有容器
+  // 隐藏除指定项以外的所有可见内容容器
   hideAllContainers(exceptContainer, callback) {
-    let containersToHide = 0;
-    let containersHidden = 0;
-    
-    const checkComplete = () => {
-      containersHidden++;
-      if (containersHidden >= containersToHide && callback) {
-        callback();
-      }
-    };
-    
-    // 计算需要隐藏的容器数量
-    if (resultsContainer && resultsContainer.style.display !== 'none' && resultsContainer !== exceptContainer) containersToHide++;
-    if (favoritesContainer && favoritesContainer.style.display !== 'none' && favoritesContainer !== exceptContainer) containersToHide++;
-    if (noResults && noResults.style.display !== 'none' && noResults !== exceptContainer) containersToHide++;
-    if (placeholder && placeholder.style.display !== 'none' && placeholder !== exceptContainer) containersToHide++;
-    
-    // 如果没有容器需要隐藏，直接执行回调
-    if (containersToHide === 0) {
-      if (callback) callback();
+    const visibleContainers = [resultsContainer, favoritesContainer, noResults, placeholder]
+      .filter(container => container && container !== exceptContainer && container.style.display !== 'none');
+
+    if (visibleContainers.length === 0) {
+      callback?.();
       return;
     }
-    
-    // 隐藏结果容器
-    if (resultsContainer && resultsContainer.style.display !== 'none' && resultsContainer !== exceptContainer) {
-      this.hideContainer(resultsContainer, checkComplete);
-    }
-    
-    // 隐藏收藏列表
-    if (favoritesContainer && favoritesContainer.style.display !== 'none' && favoritesContainer !== exceptContainer) {
-      this.hideContainer(favoritesContainer, checkComplete);
-    }
-    
-    // 隐藏无结果提示
-    if (noResults && noResults.style.display !== 'none' && noResults !== exceptContainer) {
-      this.hideContainer(noResults, checkComplete);
-    }
-    
-    // 隐藏占位符
-    if (placeholder && placeholder.style.display !== 'none' && placeholder !== exceptContainer) {
-      this.hideContainer(placeholder, checkComplete);
-    }
+
+    let remaining = visibleContainers.length;
+    const handleHidden = () => {
+      remaining--;
+      if (remaining === 0) callback?.();
+    };
+
+    visibleContainers.forEach(container => this.hideContainer(container, handleHidden));
   }
 };
 
@@ -484,9 +411,6 @@ function displaySearchResults(results) {
     
     // 显示结果容器
     containerControl.showContainer(resultsContainer, () => {
-      // 确保页面适应结果列表的高度
-      document.body.style.minHeight = '100%';
-      
       // 平滑滚动到结果开始位置
       setTimeout(() => {
         resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -626,9 +550,6 @@ function displayFavorites() {
     
     // 显示收藏容器
     containerControl.showContainer(favoritesContainer, () => {
-      // 确保页面适应收藏列表的高度
-      document.body.style.minHeight = '100%';
-      
       // 平滑滚动到结果开始位置
       setTimeout(() => {
         favoritesContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -657,11 +578,12 @@ function removeFavorite(id) {
   // 查找并移除
   const newFavorites = favorites.filter(item => item.id !== id);
   
-  // 保存到cookie
-  favoriteControl.setCookie('li-favorites', JSON.stringify(newFavorites));
+  // 保存收藏列表
+  favoriteControl.saveFavorites(newFavorites);
   
   // 找到对应的DOM元素
-  const resultItem = document.querySelector(`#favorites-list .remove-button[data-favorite-id="${id}"]`).closest('.result-item');
+  const removeButton = document.querySelector(`#favorites-list .remove-button[data-favorite-id="${id}"]`);
+  const resultItem = removeButton?.closest('.result-item');
   
   if (resultItem) {
     // 添加淡出动画
@@ -730,7 +652,6 @@ function preloadPlayerResources() {
   preloadFrame.style.left = '-9999px';
   preloadFrame.style.top = '-9999px';
   preloadFrame.onload = () => {
-    console.log('播放器资源预加载完成');
     // 加载完成后一段时间移除预加载框架，释放资源
     setTimeout(() => {
       if (preloadFrame && preloadFrame.parentNode) {
@@ -768,6 +689,21 @@ function playMusicById(id) {
   playMusic(url);
 }
 
+/** 页面加载完成后移除加载层；3 秒后兜底。 */
+function hideLoadingOverlay() {
+  const overlay = document.getElementById('main-loading-overlay');
+  if (!overlay || overlay.dataset.hiding) return;
+  overlay.dataset.hiding = 'true';
+  overlay.classList.add('hidden');
+  overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+}
+
+const loadingTimeout = setTimeout(hideLoadingOverlay, 3000);
+window.addEventListener('load', () => {
+  clearTimeout(loadingTimeout);
+  setTimeout(hideLoadingOverlay, 300);
+}, { once: true });
+
 // 事件监听器
 document.addEventListener('DOMContentLoaded', () => {
   // 初始化主题控制
@@ -785,55 +721,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初始化版本检查
   updateControl.init();
   
-  // 添加主题切换按钮事件监听 - 使用新按钮ID
-  const themeToggleBtn = document.getElementById('new-theme-toggle');
-  if (themeToggleBtn) {
-    // 简化：单个点击事件处理程序
-    themeToggleBtn.addEventListener('click', function() {
-      themeControl.toggleTheme();
-      
-      // 根据当前主题更新图标
-      const darkModeCookie = themeControl.getCookie('li-darkmode');
-      const iconElement = this.querySelector('.material-symbols-rounded');
-      
-      if (iconElement) {
-        iconElement.textContent = darkModeCookie === '1' ? 'light_mode' : 'dark_mode';
-      }
-      
-      // 更新按钮背景色（根据主题）
-      const isDarkTheme = darkModeCookie === '1';
-      this.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
-      this.style.color = isDarkTheme ? '#E0E0E0' : '#333';
-      
-      // 更新收藏按钮颜色
-      const favoritesBtn = document.getElementById('favorites-btn');
-      if (favoritesBtn) {
-        favoritesBtn.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
-        favoritesBtn.style.color = isDarkTheme ? '#E0E0E0' : '#333';
-      }
-    });
-    
-    // 初始化图标状态和按钮背景
-    const darkModeCookie = themeControl.getCookie('li-darkmode');
-    const iconElement = themeToggleBtn.querySelector('.material-symbols-rounded');
-    
-    if (iconElement && darkModeCookie === '1') {
-      iconElement.textContent = 'light_mode';
-      themeToggleBtn.style.backgroundColor = 'rgba(30,30,30,0.8)';
-      themeToggleBtn.style.color = '#E0E0E0';
-    } else {
-      themeToggleBtn.style.backgroundColor = 'rgba(255,255,255,0.8)';
-      themeToggleBtn.style.color = '#333';
-    }
-  }
+  // 主题切换
+  const themeToggleBtn = document.getElementById('theme-toggle');
+  themeToggleBtn?.addEventListener('click', () => themeControl.toggleTheme());
   
   // 收藏按钮事件监听
   if (favoritesBtn) {
     favoritesBtn.addEventListener('click', function() {
-      // 根据当前主题设置按钮样式
-      const darkModeCookie = themeControl.getCookie('li-darkmode');
-      const isDarkTheme = darkModeCookie === '1';
-      
       // 判断当前显示的是否为收藏列表
       const isShowingFavorites = favoritesContainer && favoritesContainer.style.display === 'block';
       
@@ -855,12 +749,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     
-    // 初始化收藏按钮样式
-    const darkModeCookie = themeControl.getCookie('li-darkmode');
-    const isDarkTheme = darkModeCookie === '1';
-    
-    favoritesBtn.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
-    favoritesBtn.style.color = isDarkTheme ? '#E0E0E0' : '#333';
   }
   
   // 设置当前年份
@@ -879,65 +767,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   
-  // 搜索按钮点击事件
-  searchButton.addEventListener('click', () => {
+  // 搜索按钮与回车键共用同一入口
+  const submitSearch = () => {
     const query = searchInput.value.trim();
     if (!query) return;
-    
-    // 检查是否为ID直接播放格式
+
     const directPlayId = checkDirectPlayId(query);
-    if (directPlayId) {
-      playMusicById(directPlayId);
-    } else {
-      performSearch(query);
-    }
-  });
-  
-  // 搜索输入框回车事件
-  searchInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      const query = searchInput.value.trim();
-      if (!query) return;
-      
-      // 检查是否为ID直接播放格式
-      const directPlayId = checkDirectPlayId(query);
-      if (directPlayId) {
-        playMusicById(directPlayId);
-      } else {
-        performSearch(query);
-      }
-    }
+    directPlayId ? playMusicById(directPlayId) : performSearch(query);
+  };
+
+  searchButton.addEventListener('click', submitSearch);
+  searchInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') submitSearch();
   });
   
   // 关闭播放器按钮点击事件
   closePlayer.addEventListener('click', () => {
-    // 立即更新主题按钮颜色，避免闪烁
-    const themeToggleBtn = document.getElementById('new-theme-toggle');
-    const favoritesBtn = document.getElementById('favorites-btn');
-    
-    if (themeToggleBtn || favoritesBtn) {
-      const darkModeCookie = themeControl.getCookie('li-darkmode');
-      const isDarkTheme = darkModeCookie === '1';
-      
-      // 更新主题按钮背景色和文字颜色
-      if (themeToggleBtn) {
-      themeToggleBtn.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
-      themeToggleBtn.style.color = isDarkTheme ? '#E0E0E0' : '#333';
-      
-      // 更新图标
-      const iconElement = themeToggleBtn.querySelector('.material-symbols-rounded');
-      if (iconElement) {
-        iconElement.textContent = isDarkTheme ? 'light_mode' : 'dark_mode';
-        }
-      }
-      
-      // 更新收藏按钮背景色和文字颜色
-      if (favoritesBtn) {
-        favoritesBtn.style.backgroundColor = isDarkTheme ? 'rgba(30,30,30,0.8)' : 'rgba(255,255,255,0.8)';
-        favoritesBtn.style.color = isDarkTheme ? '#E0E0E0' : '#333';
-      }
-    }
-    
     // 移除播放器激活状态
     playerContainer.classList.remove('active');
     
