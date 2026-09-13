@@ -1,6 +1,6 @@
 @font-face {
   font-family: 'xnn';
-  src: url('/player/assets/fonts/Nebulove.woff2') format('woff2');
+  src: url('../fonts/Nebulove.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -14,7 +14,6 @@
    */
 
   --eerie-black_a95: hsla(204, 9%, 95%, 0.95);
-  --eerie-black_a50: hsla(204, 9%, 95%, 0.5);
   --eerie-black: hsl(204, 9%, 95%);
   --gainsboro: hsl(225, 7%, 20%);
   --charcoal: hsl(203, 9%, 85%);
@@ -22,13 +21,9 @@
   --light-sky-blue: hsl(200, 100%, 50%);
   --prussian-blue: hsl(196, 80%, 90%);
   --black: hsl(0, 0%, 100%);
-  --black_a50: hsla(0, 0%, 0%, 0.1);
-  --black_a20: hsla(0, 0%, 0%, 0.05);
   --light-sky-blue_a8: rgba(0, 120, 212, 0.08);
   --light-sky-blue_a12: rgba(0, 120, 212, 0.12);
-  --silver-sand_a8: hsla(208, 12%, 30%, 0.08);
-  --silver-sand_a12: hsla(208, 12%, 30%, 0.12);
-  
+
   --background: var(--eerie-black);
   --background-opacity: var(--eerie-black_a95);
   --on-background: var(--gainsboro);
@@ -50,14 +45,9 @@
 
   --headline-sm: 2.6rem;
   --label-md: 1.5rem;
-  
+
   --fw-400: 400;
   --fw-500: 500;
-
-  /**
-   * box shadow
-   */
-
 
   /**
    * border radius
@@ -78,7 +68,6 @@
 /* 深色主题 */
 :root.dark-theme {
   --eerie-black_a95: hsla(204, 9%, 11%, 0.95);
-  --eerie-black_a50: hsla(204, 9%, 11%, 0.5);
   --eerie-black: hsl(204, 9%, 11%);
   --gainsboro: hsl(225, 7%, 89%);
   --charcoal: hsl(203, 9%, 28%);
@@ -86,33 +75,17 @@
   --light-sky-blue: hsl(200, 100%, 73%);
   --prussian-blue: hsl(196, 100%, 14%);
   --black: hsl(0, 0%, 0%);
-  --black_a50: hsla(0, 0%, 0%, 0.5);
-  --black_a20: hsla(0, 0%, 0%, 0.2);
   --light-sky-blue_a8: hsla(200, 100%, 73%, 0.08);
   --light-sky-blue_a12: hsla(200, 100%, 73%, 0.12);
-  --silver-sand_a8: hsla(208, 12%, 78%, 0.08);
-  --silver-sand_a12: hsla(208, 12%, 78%, 0.12);
-  
+
   --gradient: linear-gradient(180deg, hsla(204, 9%, 11%, 0.90) 60%, transparent 120%);
   --player-gradient: linear-gradient(90deg, hsla(204, 9%, 11%, 0.95) 0%, hsla(204, 9%, 11%, 0.95) 100%);
 }
 
-/* 深色主题下的特定样式调整 */
-:root.dark-theme .player-control .play {
-  background-color: var(--surface-variant);
-  color: var(--primary);
-}
-
-:root.dark-theme .player-control .play.active {
-  background-color: var(--primary);
-  color: var(--on-primary);
-}
-
-:root.dark-theme .music-banner {
-  box-shadow: none;
-}
-
-/* 浅色主题下的特定样式调整 */
+/*
+ * 播放键在浅色主题下需要额外调整；深色主题直接用 #PLAYER 里的基础样式即可。
+ * 同理 .toggle.active 的基础色就是 --primary(= --light-sky-blue)，无需再按主题覆盖。
+ */
 :root.light-theme .player-control .play {
   background-color: var(--silver-sand);
   color: var(--black);
@@ -121,10 +94,6 @@
 :root.light-theme .player-control .play.active {
   background-color: var(--light-sky-blue);
   color: var(--black);
-}
-
-:root.light-theme .player-control .toggle.active {
-  color: var(--light-sky-blue);
 }
 
 :root.light-theme .music-banner {
@@ -158,10 +127,18 @@ body,
   box-sizing: border-box;
 }
 
+li { list-style: none; }
+
+a,
 img,
 span,
 input,
 button { display: block; }
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
 
 img { height: auto; }
 
@@ -255,8 +232,9 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   font-weight: var(--fw-400);
 }
 
+.label-md { font-weight: var(--fw-500); }
+
 .label-md {
-  font-weight: var(--fw-500);
   font-size: var(--label-md);
   letter-spacing: 0.5px;
 }
@@ -444,14 +422,52 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 .player-control .btn-icon .default-icon,
 .player-control .btn-icon.active .active-icon { display: block; }
 
-/* 音量控制器样式 - 默认隐藏 */
+/* 音量控制器 - 窄屏隐藏，宽屏(>=992px)由 JS 创建后显示 */
 .volume {
   display: none !important;
-  width: auto;
-  min-width: auto;
   position: relative;
   z-index: 2;
   background-color: transparent;
+}
+
+/* 音量滑块的轨道与滑块(原先由 JS 动态注入 <style>，现已内联到此处) */
+.volume input[type="range"]::-webkit-slider-runnable-track {
+  appearance: none;
+  background-color: var(--surface-variant);
+  height: 6px;
+  border-radius: var(--radius-pill);
+  border: none;
+  outline: none;
+}
+
+.volume input[type="range"]::-moz-range-track {
+  appearance: none;
+  background-color: var(--surface-variant);
+  height: 6px;
+  border-radius: var(--radius-pill);
+  border: none;
+}
+
+.volume input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  margin-block-start: -5px;
+  border-radius: var(--radius-pill);
+  border: none;
+  box-shadow: none;
+}
+
+.volume input[type="range"]::-moz-range-thumb {
+  appearance: none;
+  background-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  border: none;
+  box-shadow: none;
 }
 
 /*-----------------------------------*\
@@ -462,6 +478,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
  * responsive for large than 575px screen
  */
 @media (min-width: 575px) {
+  body { }
   .player .container { max-width: 540px; }
 }
 
@@ -687,7 +704,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
     width: 150px;
     min-width: 150px;
     z-index: 5;
-    background-color: var(--background-opacity);
     padding: 4px 8px;
     border-radius: var(--radius-pill);
     margin-right: -8px;
@@ -711,9 +727,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
     z-index: 5;
   }
   
-  .volume .range-fill { width: 100%; }
-  
-  /* 超宽屏幕下修复容器限制 */
+    /* 超宽屏幕下修复容器限制 */
   @media (min-width: 1921px) {
     .player .container {
       max-width: 1600px;
@@ -725,23 +739,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 /**
  * 主题相关的样式覆盖
  */
-
-/* 浅色主题下的滑块颜色 */
-:root.light-theme .range::-webkit-slider-thumb {
-  background-color: var(--light-sky-blue);
-}
-
-:root.light-theme .range-fill {
-  background-color: var(--light-sky-blue);
-}
-
-:root.light-theme .toggle.active {
-  color: var(--light-sky-blue);
-}
-
-:root.light-theme .volume input[type="range"]::-webkit-slider-thumb {
-  background-color: var(--light-sky-blue);
-}
 
 /* 按下按钮时的浅色主题状态修复 */
 :root.light-theme .btn-icon:active {
@@ -757,16 +754,42 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   opacity: 0.8;
 }
 
-/* 深色主题下的滑块样式 */
+/* 深色主题下给滑块加一点阴影(颜色仍走基础的 --primary) */
 :root.dark-theme .range::-webkit-slider-thumb {
-  background-color: var(--light-sky-blue);
   box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
 }
+/*-----------------------------------*\
+  #LOADING OVERLAY
+\*-----------------------------------*/
 
-:root.dark-theme .volume input[type="range"]::-webkit-slider-thumb {
-  background-color: var(--light-sky-blue);
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: var(--background);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  z-index: 1000;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
 }
 
-:root.dark-theme .range-fill {
-  background-color: var(--light-sky-blue);
+.loading-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.loading-spinner {
+  width: 60px;
+  height: 60px;
+  margin-bottom: 20px;
+}
+
+.loading-text {
+  font-size: 16px;
+  color: var(--on-background);
+  font-weight: 500;
 }

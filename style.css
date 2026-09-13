@@ -1,3 +1,20 @@
+/* 自定义字体 */
+@font-face {
+  font-family: 'Pacifico';
+  src: url('./player/assets/fonts/pacifico.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Nebulove';
+  src: url('./player/assets/fonts/Nebulove.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* 基础样式 */
 :root {
   --primary-color: #4285F4;
@@ -36,6 +53,7 @@ body {
   color: var(--text-color);
   line-height: 1.6;
   min-height: 100vh;
+  padding: 0;
   overflow-x: hidden;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
@@ -78,40 +96,40 @@ header {
   font-family: 'Pacifico', cursive;
 }
 
-/* 右上角操作按钮 */
-.top-actions {
+/* 右上角的收藏 / 主题切换按钮 */
+.top-btn {
   position: fixed;
   top: 20px;
-  right: 20px;
-  display: flex;
-  gap: 10px;
-  z-index: 999;
-}
-
-.top-action {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background-color: var(--card-bg);
+  background-color: rgba(255, 255, 255, 0.8);
   color: var(--text-color);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-color);
   cursor: pointer;
-  box-shadow: 0 2px 10px var(--shadow-color);
-  transition: transform var(--transition-normal), background-color var(--transition-normal), color var(--transition-normal);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  z-index: 999;
 }
 
-.top-action:hover {
-  transform: scale(1.05);
-  background-color: var(--primary-color);
-  color: white;
+.top-btn:hover {
+  background-color: #4285F4;
+  color: #fff;
 }
 
-.top-action .material-symbols-rounded {
-  font-size: 20px;
-  pointer-events: none;
+:root.dark-theme .top-btn {
+  background-color: rgba(30, 30, 30, 0.8);
+}
+
+#favorites-btn {
+  right: 70px;
+}
+
+#new-theme-toggle {
+  right: 20px;
 }
 
 /* 搜索框 */
@@ -119,6 +137,11 @@ header {
   width: 100%;
   max-width: 600px;
   margin: 0 auto;
+}
+
+#search-input,
+#search-button {
+  font-family: 'Nebulove', sans-serif;
 }
 
 .search-box {
@@ -342,7 +365,7 @@ main {
   transition: color var(--transition-normal);
 }
 
-.no-results p, .placeholder p {
+.no-results p {
   max-width: 400px;
   margin: 0 auto;
   font-size: 16px;
@@ -368,6 +391,7 @@ main {
   padding: 20px 0;
   border-top: 1px solid var(--border-color);
   color: var(--text-color);
+  font-family: 'Pacifico', cursive;
   opacity: 0.7;
   transition: border-color var(--transition-normal), color var(--transition-normal);
 }
@@ -522,11 +546,6 @@ main {
   z-index: 10000;
   opacity: 1;
   transition: opacity 0.5s ease-out, background-color 0.3s ease;
-}
-
-.main-loading-overlay.hidden {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .main-loading-overlay img {
