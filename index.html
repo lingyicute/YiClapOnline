@@ -7,59 +7,30 @@
   <link rel="shortcut icon" href="./assets/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./style.css">
   <!-- 图标 - 本地托管 -->
-  <link rel="stylesheet" href="/assets/material-icons.css" />
-  <!-- 自定义字体 -->
-  <style>    
-    @font-face {
-      font-family: 'Pacifico';
-      src: url('./player/assets/fonts/pacifico.woff2') format('woff2');
-      font-weight: normal;
-      font-style: normal;
-      font-display: block;
-    }
-    
-    @font-face {
-      font-family: 'Nebulove';
-      src: url('./player/assets/fonts/Nebulove.woff2') format('woff2');
-      font-weight: normal;
-      font-style: normal;
-      font-display: swap;
-    }
-    
-    h1 {
-      font-family: 'Pacifico', cursive;
-      margin: 0;
-      font-weight: normal;
-    }
-    
-    #search-input, #search-button {
-      font-family: 'Nebulove', sans-serif;
-    }
-  </style>
+  <link rel="stylesheet" href="./assets/material-icons.css">
 </head>
 <body>
   <!-- 右上角按钮 -->
-  <div class="top-actions">
-    <button id="favorites-btn" class="top-action" type="button" aria-label="查看收藏">
-      <span class="material-symbols-rounded">favorite_border</span>
-    </button>
-    <button id="theme-toggle" class="top-action" type="button" aria-label="切换深浅主题">
-      <span class="material-symbols-rounded">dark_mode</span>
-    </button>
-  </div>
-  
+  <button id="favorites-btn" class="top-btn">
+    <span class="material-symbols-rounded">favorite_border</span>
+  </button>
+
+  <button id="new-theme-toggle" class="top-btn">
+    <span class="material-symbols-rounded">dark_mode</span>
+  </button>
+
   <!-- 主页加载覆盖层 -->
   <div id="main-loading-overlay" class="main-loading-overlay">
     <img src="./player/assets/images/loading.svg" alt="加载中...">
   </div>
-  
+
   <div class="container">
     <header>
       <div class="logo">
         <img src="./assets/logo.svg" alt="YiClapOnline" width="120">
         <h1>YiClapOnline</h1>
       </div>
-      
+
       <div class="search-container">
         <div class="search-box">
           <input type="text" id="search-input" placeholder="输入歌曲名称、歌手或 Clap ID..." autofocus>
@@ -86,7 +57,7 @@
           <!-- 搜索结果将动态插入这里 -->
         </div>
       </div>
-      
+
       <!-- 收藏列表容器 -->
       <div id="favorites-container" class="results-container" style="display: none;">
         <div class="results-header">
@@ -98,26 +69,56 @@
           <!-- 收藏列表将动态插入这里 -->
         </div>
       </div>
-      
+
       <div id="no-results" class="no-results" style="display: none;">
         <p>未找到相关歌曲，请尝试其他关键词。</p>
       </div>
-      
-      <div id="placeholder" class="placeholder">
-      </div>
+
+      <div id="placeholder" class="placeholder"></div>
     </main>
 
-    <footer class="footer" style="font-family: 'Pacifico', cursive;">
+    <footer class="footer">
       <p>Copyright &copy; <span id="current-year"></span> lingyicute</p>
     </footer>
 
     <div id="player-container" class="player-container">
-      <iframe id="player-frame" src="" title="音乐播放器"></iframe>
+      <iframe id="player-frame" src="" frameborder="0"></iframe>
       <button id="close-player" class="close-player">
         <span class="material-symbols-rounded">close</span>
       </button>
     </div>
   </div>
+
+  <!-- 加载覆盖层处理脚本 -->
+  <script>
+    (function () {
+      // 淡出并移除覆盖层(至少显示 300ms)
+      function hideOverlay() {
+        setTimeout(function () {
+          const overlay = document.getElementById('main-loading-overlay');
+          if (!overlay) return;
+
+          overlay.style.opacity = '0';
+          setTimeout(() => overlay.remove(), 500);
+        }, 300);
+      }
+
+      // 最长等待 3 秒，超时后强制隐藏覆盖层
+      const loadingTimeout = setTimeout(function () {
+        console.warn('加载超时，强制隐藏覆盖层');
+        hideOverlay();
+      }, 3000);
+
+      window.addEventListener('load', function () {
+        clearTimeout(loadingTimeout);
+        hideOverlay();
+      });
+    })();
+  </script>
+
+  <script src="./assets/common.js"></script>
+  <script src="./assets/source.js"></script>
+  <script src="./app.js"></script>
 
   <!-- 更新提示弹窗 -->
   <div class="update-modal-overlay" id="updateOverlay"></div>
@@ -131,7 +132,5 @@
       <button id="refreshButton">刷新</button>
     </div>
   </div>
-
-  <script src="./app.js"></script>
 </body>
-</html> 
+</html>
