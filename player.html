@@ -37,18 +37,46 @@
     }
 
     /* 加载遮罩的关键样式内联在此：player.css 是异步加载的，遮罩不能等它 */
-    html { background-color: hsl(204, 9%, 95%); font-family: sans-serif; } /* player.css 到达后会被 Nebulove 覆盖 */
-    html.dark-theme { background-color: hsl(204, 9%, 11%); }
+    html {
+      background-color: hsl(204, 9%, 95%);
+      font-family: sans-serif;
+    }
+
+    /* player.css 到达后会被 Nebulove 覆盖 */
+    html.dark-theme {
+      background-color: hsl(204, 9%, 11%);
+    }
+
     .loading-overlay {
-      position: fixed; inset: 0; z-index: 1000;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background-color: hsl(204, 9%, 95%); color: hsl(225, 7%, 20%);
-      font-size: 16px; line-height: 1.5;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: hsl(204, 9%, 95%);
+      color: hsl(225, 7%, 20%);
+      font-size: 16px;
+      line-height: 1.5;
       transition: opacity 0.5s ease, visibility 0.5s ease;
     }
-    html.dark-theme .loading-overlay { background-color: hsl(204, 9%, 11%); color: hsl(225, 7%, 89%); }
-    .loading-overlay.hidden { opacity: 0; visibility: hidden; }
-    .loading-spinner { width: 60px; height: 60px; margin-bottom: 20px; }
+
+    html.dark-theme .loading-overlay {
+      background-color: hsl(204, 9%, 11%);
+      color: hsl(225, 7%, 89%);
+    }
+
+    .loading-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .loading-spinner {
+      width: 60px;
+      height: 60px;
+      margin-bottom: 20px;
+    }
   </style>
 
   <!-- 资源加载器，与 index.html 中的同源；说明见 index.html -->
@@ -59,7 +87,7 @@
 
       try {
         document.documentElement.classList.add(localStorage.getItem('yiclape:darkmode') === '1' ? 'dark-theme' : 'light-theme');
-      } catch (e) {}
+      } catch (e) { }
 
       var booted = false;
       function boot(version) {
@@ -120,7 +148,11 @@
               <h2 class="headline-sm" data-title>加载中...</h2>
               <p class="label-md artist" data-artist>请稍候</p>
               <div class="vip-parse-banner" data-vip-banner hidden>
-                <span class="material-symbols-rounded" aria-hidden="true">workspace_premium</span>
+                <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" aria-hidden="true"
+                  style="display: inline-block; vertical-align: middle;">
+                  <path
+                    d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z" />
+                </svg>
                 <span class="vip-parse-text">YiClapOnline 独家为您解析 VIP 歌曲</span>
               </div>
             </div>
@@ -128,7 +160,8 @@
             <div class="seek-control">
               <div class="seek-wrapper">
                 <div class="range-wrapper">
-                  <input type="range" min="0" step="1" max="60" value="0" class="range" data-range data-seek aria-label="播放进度">
+                  <input type="range" min="0" step="1" max="60" value="0" class="range" data-range data-seek
+                    aria-label="播放进度">
 
                   <div class="range-fill"></div>
                 </div>
