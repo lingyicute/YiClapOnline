@@ -7,7 +7,7 @@
  * 因此不存在跨文件的加载顺序问题：任何页面拿到的一定是完整定义。
  *
  * 文件结构：
- *   1. 共享层     cookie 读写(主题/版本) / 主题 / 收藏(仅 localStorage)
+ *   1. 共享层     localStorage(主题/版本/收藏) + 旧 cookie 迁移清理
  *   2. 数据源层   musicSource —— 换源只需要改这一节
  *   3. 主页       搜索、结果列表、收藏列表
  *   4. 播放器     取歌、播放控制、音量
@@ -18,7 +18,20 @@
    1. 共享层
    ========================================================================== */
 
-/** cookie 读写 */
+// 新的统一存储键（yiclape: 前缀）
+const THEME_KEY = 'yiclape:darkmode';
+const VERSION_KEY = 'yiclape:version';
+const FAVORITES_KEY = 'yiclape:favorites';
+const LEGACY_FAVORITES_KEYS = ['li-favorites'];   // 只删不读
+
+// 遗留 cookie 名称（已迁移至 localStorage，保留此处仅用于迁移与清理）
+const LEGACY_THEME_COOKIE = 'li-darkmode';
+const LEGACY_VERSION_COOKIE = 'li-version';
+
+/** 
+ * cookie 读写 - 仅用于遗留数据迁移和清理
+ * 新功能请直接使用 localStorage
+ */
 const cookieStore = {
   get(name) {
     const prefix = name + '=';
@@ -43,16 +56,93 @@ const cookieStore = {
 };
 
 /**
- * 主题控制 - 读取 li-darkmode cookie 并应用相应主题
+ * 将旧 cookie 迁移到 localStorage，成功后删除原 cookie
+ * 策略：
+ *  - 如果 localStorage 已有值，说明已迁移过，直接清理 cookie
+ *  - 如果 cookie 有值而 localStorage 无值，则迁移并删除 cookie
+ *  - 如果 localStorage 写入失败（被禁用/配额满），保留 cookie 不删，避免数据丢失
+ * @param {string} cookieName
+ * @param {string} storageKey
+ * @returns {string|null} 迁移后的值或已存在的值
+ */
+function migrateCookieToLocalStorage(cookieName, storageKey) {
+  try {
+    let existing = null;
+    try {
+      existing = localStorage.getItem(storageKey);
+    } catch (e) {
+      console.warn(`[迁移] 读取 localStorage 失败 ${storageKey}:`, e);
+      return null;
+    }
+
+    if (existing !== null) {
+      // 已迁移，只需清理遗留 cookie
+      try {
+        if (cookieStore.get(cookieName) !== null) {
+          cookieStore.remove(cookieName);
+          console.log(`[迁移] 清理已迁移的遗留 cookie: ${cookieName}`);
+        }
+      } catch (e) {
+        console.warn(`[迁移] 清理 cookie 失败 ${cookieName}:`, e);
+      }
+      return existing;
+    }
+
+    const cookieVal = cookieStore.get(cookieName);
+    if (cookieVal !== null) {
+      try {
+        localStorage.setItem(storageKey, cookieVal);
+      } catch (e) {
+        console.warn(`[迁移] 写入 localStorage 失败 ${storageKey}，保留 cookie:`, e);
+        return null;
+      }
+      // 写入成功后再删 cookie
+      try {
+        cookieStore.remove(cookieName);
+        console.log(`[迁移] 已将 ${cookieName} -> ${storageKey}: ${cookieVal}，并删除原 cookie`);
+      } catch (e) {
+        console.warn(`[迁移] 删除 cookie 失败 ${cookieName}:`, e);
+      }
+      return cookieVal;
+    }
+  } catch (e) {
+    console.warn(`[迁移] ${cookieName} -> ${storageKey} 失败:`, e);
+  }
+  return null;
+}
+
+function runLegacyMigrations() {
+  migrateCookieToLocalStorage(LEGACY_THEME_COOKIE, THEME_KEY);
+  migrateCookieToLocalStorage(LEGACY_VERSION_COOKIE, VERSION_KEY);
+}
+
+// 页面加载时立即尝试迁移，避免主题闪烁
+try {
+  runLegacyMigrations();
+} catch (e) {
+  console.warn('[迁移] 初始化迁移失败:', e);
+}
+
+/**
+ * 主题控制 - 读取 localStorage['yiclape:darkmode'] 并应用相应主题
  * '1': 深色主题, 其它/不存在: 浅色主题(默认)
+ * 已从 cookie 迁移至 localStorage，旧 cookie 会在迁移后自动删除
  */
 const themeControl = {
   isDark() {
-    return cookieStore.get('li-darkmode') === '1';
+    try {
+      return localStorage.getItem(THEME_KEY) === '1';
+    } catch {
+      return false;
+    }
   },
 
   toggleTheme() {
-    cookieStore.set('li-darkmode', this.isDark() ? '0' : '1');
+    try {
+      localStorage.setItem(THEME_KEY, this.isDark() ? '0' : '1');
+    } catch (e) {
+      console.error('[主题] 保存失败(浏览器可能禁用了 localStorage 或空间已满):', e);
+    }
     this.applyTheme();
   },
 
@@ -68,18 +158,14 @@ const themeControl = {
   init(onChange) {
     this.applyTheme();
 
-    let dark = this.isDark();
-
-    // 主题存在 cookie 里，而 cookie 变更不会触发 storage 事件，
-    // 所以主页与播放器 iframe 之间只能靠轮询同步。
-    setInterval(() => {
-      const nowDark = this.isDark();
-      this.applyTheme();
-      if (nowDark !== dark) {
-        dark = nowDark;
-        if (onChange) onChange(dark);
+    // 使用 storage 事件实现跨标签/iframe 同步，替代旧的轮询方案
+    // localStorage 变更会触发 storage 事件，比轮询更高效、实时
+    window.addEventListener('storage', (event) => {
+      if (event.key === THEME_KEY) {
+        this.applyTheme();
+        if (onChange) onChange(this.isDark());
       }
-    }, 2000);
+    });
   }
 };
 
@@ -93,9 +179,6 @@ const themeControl = {
  * 所以读取时拿 musicSource.name 比对，不一致就当没有收藏并清掉旧数据。
  * 历史上的 li-favorites cookie / li-favorites localStorage 均已废弃，一律不读，见到就删。
  */
-const FAVORITES_KEY = 'yiclape:favorites';
-const LEGACY_FAVORITES_KEYS = ['li-favorites'];   // 只删不读
-
 const favorites = {
   /**
    * 当前数据源标识。优先用 musicSource.id(稳定标识)，没有才退回 name。
@@ -193,8 +276,25 @@ const favorites = {
       }
 
       // 历史上这些 key 一律写在 path=/ 下，所以一次过期删除即可覆盖
-      cookieStore.remove(key);
+      try {
+        cookieStore.remove(key);
+      } catch (e) {
+        console.warn('[收藏] 旧 cookie 清除失败:', e);
+      }
     }
+
+    // 防御性清理：主题和版本的旧 cookie 理应在 runLegacyMigrations 中已删，
+    // 此处再次确保旧 cookie 不会残留
+    try {
+      if (localStorage.getItem(THEME_KEY) !== null) {
+        cookieStore.remove(LEGACY_THEME_COOKIE);
+      }
+    } catch {}
+    try {
+      if (localStorage.getItem(VERSION_KEY) !== null) {
+        cookieStore.remove(LEGACY_VERSION_COOKIE);
+      }
+    } catch {}
   }
 };
 
@@ -616,12 +716,17 @@ function syncThemeIcon() {
 }
 
 /**
- * 版本检查和更新提示
+ * 版本检查和更新提示 - 已迁移至 localStorage
  */
 const updateControl = {
   async checkForUpdate() {
     try {
-      const localVersion = cookieStore.get('li-version') || '0';
+      let localVersion = '0';
+      try {
+        localVersion = localStorage.getItem(VERSION_KEY) || '0';
+      } catch (e) {
+        console.warn('[更新] 读取本地版本失败:', e);
+      }
 
       const response = await fetch('./update.json?' + Date.now());
       if (!response.ok) {
@@ -659,7 +764,16 @@ const updateControl = {
     });
 
     refreshButton.onclick = () => {
-      cookieStore.set('li-version', updateData.version);
+      try {
+        localStorage.setItem(VERSION_KEY, updateData.version);
+      } catch (e) {
+        console.error('[更新] 保存版本失败:', e);
+      }
+
+      // 防御性清理遗留 cookie（迁移时已删，此处再次确保）
+      try {
+        cookieStore.remove(LEGACY_VERSION_COOKIE);
+      } catch {}
 
       // 清除缓存后强制刷新
       if ('caches' in window) {
@@ -743,8 +857,8 @@ function initMainPage() {
     }
   });
 
-  // 播放器 iframe 里点爱心增删收藏时，若收藏列表正开着就跟着刷新。
-  // 换到 localStorage 之后才有这个可能：cookie 变更不会触发 storage 事件。
+  // 播放器 iframe 里点爱心增删收藏/切换主题时，若对应界面正开着就跟着刷新
+  // 已迁移至 localStorage，storage 事件可跨 iframe 实时同步
   window.addEventListener('storage', event => {
     if (event.key === FAVORITES_KEY && favoritesContainer.style.display === 'block') {
       displayFavorites();
@@ -1130,6 +1244,13 @@ function initPlayerPage() {
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 再次尝试迁移（防御性，初始化时可能 localStorage 暂不可用）
+  try {
+    runLegacyMigrations();
+  } catch (e) {
+    console.warn('[迁移] DOMContentLoaded 迁移失败:', e);
+  }
+
   favorites.purgeLegacy();   // 旧 cookie 与旧 localStorage 键：一进页面就删，不读不迁
 
   if (document.body.dataset.page === 'player') {
