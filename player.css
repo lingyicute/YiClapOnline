@@ -833,3 +833,59 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   color: var(--on-background);
   font-weight: 500;
 }
+
+/*-----------------------------------*\
+  #VIP PARSE BANNER
+  点击 VIP 歌曲时在播放器内展示的"独家解析"提示
+\*-----------------------------------*/
+
+.vip-parse-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  font-size: 1.4rem;
+  font-weight: var(--fw-500);
+  letter-spacing: 0.5px;
+  color: #b8740a;
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.14), rgba(247, 151, 30, 0.14));
+  border: 1px solid rgba(247, 151, 30, 0.4);
+  backdrop-filter: blur(4px);
+  /* 上方 artist 已有 20px 下边距，这里不再额外加间距，避免空隙过大 */
+  margin-top: 0;
+  animation: vip-banner-in 0.45s ease both;
+}
+
+/* hidden 属性优先级高于上面的 display，确保非 VIP 歌曲不显示 */
+.vip-parse-banner[hidden] {
+  display: none;
+}
+
+.vip-parse-banner .material-symbols-rounded {
+  font-size: 1.9rem;
+  color: #f7971e;
+  flex-shrink: 0;
+}
+
+.vip-parse-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root.dark-theme .vip-parse-banner {
+  color: #ffce6b;
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.18), rgba(247, 151, 30, 0.18));
+  border-color: rgba(247, 151, 30, 0.55);
+}
+
+:root.dark-theme .vip-parse-banner .material-symbols-rounded {
+  color: #ffb347;
+}
+
+@keyframes vip-banner-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
