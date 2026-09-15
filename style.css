@@ -142,6 +142,10 @@ header {
   right: 20px;
 }
 
+#quality-btn {
+  right: 120px;
+}
+
 /* 搜索框 */
 .search-container {
   width: 100%;
@@ -771,4 +775,60 @@ main {
 
 :root.dark-theme .update-modal-time {
   color: #aaa;
+}
+
+/* 音质选择弹窗 */
+.quality-hint {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-color);
+  opacity: 0.72;
+  margin: 0 0 14px;
+}
+
+.quality-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quality-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+}
+
+.quality-option:hover {
+  background: rgba(66, 133, 244, 0.06);
+}
+
+.quality-option.active {
+  border-color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.12);
+}
+
+.quality-label {
+  font-weight: 500;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.quality-warn {
+  font-size: 12px;
+  text-align: right;
+  color: #b8740a;
+}
+
+:root.dark-theme .quality-warn {
+  color: #ffce6b;
 }
