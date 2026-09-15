@@ -7,7 +7,7 @@
  * 因此不存在跨文件的加载顺序问题：任何页面拿到的一定是完整定义。
  *
  * 文件结构：
- *   1. 共享层     cookie 读写 / 主题 / 收藏
+ *   1. 共享层     cookie 读写(主题/版本) / 主题 / 收藏(仅 localStorage)
  *   2. 数据源层   musicSource —— 换源只需要改这一节
  *   3. 主页       搜索、结果列表、收藏列表
  *   4. 播放器     取歌、播放控制、音量
@@ -35,6 +35,10 @@ const cookieStore = {
     const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
     const secure = location.protocol === 'https:' ? '; secure' : '';
     document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax${secure}`;
+  },
+
+  remove(name) {
+    this.set(name, '', -1);
   }
 };
 
@@ -79,40 +83,118 @@ const themeControl = {
   }
 };
 
-/** 收藏列表 - 保存在 li-favorites cookie 中，元素形如 { id, title, artist } */
-const favoriteControl = {
-  getFavorites() {
-    const raw = cookieStore.get('li-favorites');
-    if (!raw) return [];
+/**
+ * 收藏 —— 只用 localStorage
+ *
+ * 存储结构：localStorage['yiclape:favorites'] = JSON.stringify({ source, items })
+ *   items: [{ id, title, artist }]   // id 是当前数据源给的不透明字符串
+ *
+ * source 字段就是"作废开关"：收藏里的 id 只在当前数据源内有效，换源之后必然全是死链，
+ * 所以读取时拿 musicSource.name 比对，不一致就当没有收藏并清掉旧数据。
+ * 历史上的 li-favorites cookie / li-favorites localStorage 均已废弃，一律不读，见到就删。
+ */
+const FAVORITES_KEY = 'yiclape:favorites';
+const LEGACY_FAVORITES_KEYS = ['li-favorites'];   // 只删不读
 
+const favorites = {
+  /**
+   * 当前数据源标识。优先用 musicSource.id(稳定标识)，没有才退回 name。
+   * name 按约定只用于展示，改个显示名不该把收藏清空；两者都没有时退化成空串。
+   */
+  sourceTag() {
+    return (musicSource && (musicSource.id || musicSource.name)) || '';
+  },
+
+  /** 收藏列表；脏数据 / 存储不可用一律退化成 []，绝不向外抛 */
+  read() {
     try {
-      return JSON.parse(raw);
+      const raw = localStorage.getItem(FAVORITES_KEY);
+      if (raw === null) return [];
+
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.items)) return [];
+      if (data.source !== this.sourceTag()) {
+        this.clear();          // 换数据源了，旧收藏整体作废
+        return [];
+      }
+
+      return data.items
+        .filter(item => item && typeof item.id === 'string' && item.id)
+        .map(({ id, title, artist }) => ({
+          id,
+          title: typeof title === 'string' ? title : '',
+          artist: typeof artist === 'string' ? artist : '',
+        }));
     } catch (error) {
-      console.error('解析收藏列表失败:', error);
+      console.error('[收藏] 读取失败，按空列表处理:', error);
       return [];
     }
   },
 
-  isFavorite(songId) {
-    return !!songId && this.getFavorites().some(item => item.id === songId);
+  /** 整体写回；浏览器禁用存储或配额满时返回 false，由调用方提示 */
+  write(items) {
+    try {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify({ source: this.sourceTag(), items }));
+      return true;
+    } catch (error) {
+      console.error('[收藏] 保存失败(浏览器可能禁用了 localStorage 或空间已满):', error);
+      return false;
+    }
   },
 
-  addFavorite(songId, title, artist) {
-    if (!songId || this.isFavorite(songId)) return false;
-
-    const favorites = this.getFavorites();
-    favorites.push({ id: songId, title, artist });
-    cookieStore.set('li-favorites', JSON.stringify(favorites));
-    return true;
+  clear() {
+    try {
+      localStorage.removeItem(FAVORITES_KEY);
+    } catch (error) {
+      console.error('[收藏] 清除失败:', error);
+    }
   },
 
-  removeFavorite(songId) {
-    const favorites = this.getFavorites();
-    const remaining = favorites.filter(item => item.id !== songId);
-    if (remaining.length === favorites.length) return false;
+  has(songId) {
+    return !!songId && this.read().some(item => item.id === songId);
+  },
 
-    cookieStore.set('li-favorites', JSON.stringify(remaining));
-    return true;
+  add({ id, title, artist } = {}) {
+    if (!id || this.has(id)) return false;
+
+    const items = this.read();
+    items.push({ id, title: title || '', artist: artist || '' });
+    return this.write(items);
+  },
+
+  remove(songId) {
+    if (!songId) return false;
+
+    const items = this.read();
+    const remaining = items.filter(item => item.id !== songId);
+    if (remaining.length === items.length) return false;
+
+    return this.write(remaining);
+  },
+
+  /**
+   * 收藏/取消收藏一次搞定，避免"读-判断-写"两步之间的竞态。
+   * @returns {boolean} 操作完成后这首歌的真实收藏状态(以存储为准，写失败会退回原状)
+   */
+  toggle({ id, title, artist } = {}) {
+    if (!id) return false;
+
+    this.has(id) ? this.remove(id) : this.add({ id, title, artist });
+    return this.has(id);
+  },
+
+  /** 启动清理：历史遗留的收藏 cookie 与旧 localStorage 键，只删不读 */
+  purgeLegacy() {
+    for (const key of LEGACY_FAVORITES_KEYS) {
+      try {
+        localStorage.removeItem(key);
+      } catch (error) {
+        console.warn('[收藏] 旧 localStorage 键清除失败:', error);
+      }
+
+      // 历史上这些 key 一律写在 path=/ 下，所以一次过期删除即可覆盖
+      cookieStore.remove(key);
+    }
   }
 };
 
@@ -128,11 +210,20 @@ const favoriteControl = {
      2. search() 无结果时返回空数组，不要 throw（空结果是正常情况，不是错误）。
      3. id 对应用层是不透明字符串，由数据源自己定义格式。除了「输入
         c<id> 直接播放」这个输入约定外，应用层不会解析或拼接它。
+     4. musicSource.id 是"这批收藏属于哪个源"的标识：换源时改它，
+        旧收藏会整体作废(旧 id 到新源上本来就播不了)。
    ========================================================================== */
 
 const musicSource = {
-  /** 数据源名称，仅用于日志与错误提示 */
+  /** 数据源名称，仅用于日志与错误提示(可随时改，不影响已存的收藏) */
   name: '未配置',
+
+  /**
+   * 数据源稳定标识，写进收藏数据里用于"换源即作废"。
+   * 换数据源时请改这个值(如 'gequbao' -> 'newapi')，老收藏会被整体丢弃；
+   * 留空则退化成用 name。
+   */
+  id: '',
 
   /**
    * 按关键词搜索歌曲。
@@ -388,16 +479,16 @@ function displaySearchResults(results) {
  */
 function displayFavorites() {
   containerControl.hideAllContainers(null, () => {
-    const favorites = favoriteControl.getFavorites();
+    const items = favorites.read();
 
-    if (favorites.length === 0) {
+    if (items.length === 0) {
       showNotice('暂无收藏歌曲');
       return;
     }
 
     favoritesList.innerHTML = '';
-    favorites.forEach(favorite => favoritesList.appendChild(buildSongRow(favorite, true)));
-    setCount(favoritesContainer, `共有 ${favorites.length} 首收藏歌曲`);
+    items.forEach(item => favoritesList.appendChild(buildSongRow(item, true)));
+    setCount(favoritesContainer, `共有 ${items.length} 首收藏歌曲`);
     reveal(favoritesContainer);
   });
 }
@@ -412,12 +503,12 @@ function playTrack(id) {
 }
 
 /**
- * 从收藏列表中移除歌曲
+ * 从收藏列表里删掉一行（存储层删除 + 淡出动画 + 计数更新）
  * @param {string} id - 歌曲ID
  */
-function removeFavorite(id) {
-  favoriteControl.removeFavorite(id);
-  const remaining = favoriteControl.getFavorites();
+function removeFavoriteRow(id) {
+  favorites.remove(id);
+  const remaining = favorites.read();
 
   // 用属性比对而非拼选择器，避免 id 中的特殊字符破坏选择器
   const button = [...favoritesList.querySelectorAll('.remove-button')]
@@ -646,9 +737,17 @@ function initMainPage() {
     if (!id) return;
 
     if (button.classList.contains('remove-button')) {
-      removeFavorite(id);
+      removeFavoriteRow(id);
     } else {
       playTrack(id);
+    }
+  });
+
+  // 播放器 iframe 里点爱心增删收藏时，若收藏列表正开着就跟着刷新。
+  // 换到 localStorage 之后才有这个可能：cookie 变更不会触发 storage 事件。
+  window.addEventListener('storage', event => {
+    if (event.key === FAVORITES_KEY && favoritesContainer.style.display === 'block') {
+      displayFavorites();
     }
   });
 
@@ -908,7 +1007,7 @@ function updatePlayerUI(track) {
 
   // 供收藏功能读取当前歌曲
   window.currentSong = { id: track.id, title: track.title, artist: track.artist };
-  updateFavoriteButtonUI(favoriteControl.isFavorite(track.id));
+  updateFavoriteButtonUI(favorites.has(track.id));
 
   // 数据源没给封面时，沿用 HTML 里的默认封面
   if (playerBanner && track.cover) {
@@ -1009,20 +1108,14 @@ function initPlayerPage() {
 
   // 收藏按钮
   document.querySelector('[data-favorite]')?.addEventListener('click', () => {
-    if (!window.currentSong?.id) {
+    const song = window.currentSong;
+    if (!song?.id) {
       console.warn('无法收藏：当前没有播放歌曲或歌曲ID不可用');
       return;
     }
 
-    const { id, title, artist } = window.currentSong;
-    const nowFavorite = !favoriteControl.isFavorite(id);
-
-    if (nowFavorite) {
-      favoriteControl.addFavorite(id, title, artist);
-    } else {
-      favoriteControl.removeFavorite(id);
-    }
-    updateFavoriteButtonUI(nowFavorite);
+    // toggle 返回落盘后的真实状态：浏览器拒绝写 localStorage 时按钮不会被点成"已收藏"
+    updateFavoriteButtonUI(favorites.toggle(song));
   });
 
   // 屏幕尺寸变化时按需重建音量控制器
@@ -1037,6 +1130,8 @@ function initPlayerPage() {
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
+  favorites.purgeLegacy();   // 旧 cookie 与旧 localStorage 键：一进页面就删，不读不迁
+
   if (document.body.dataset.page === 'player') {
     initPlayerPage();
   } else {
