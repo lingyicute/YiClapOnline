@@ -44,6 +44,19 @@
     html.dark-theme .main-loading-overlay { background-color: #121212; }
     .main-loading-overlay img { width: 60px; }
     .main-loading-overlay .boot-error { font: 15px/1.6 sans-serif; color: #c62828; text-align: center; padding: 0 24px; }
+
+    /*
+     * 默认隐藏的元素也必须在这里内联：
+     * style.css 是异步加载的，在它到达之前这些元素若没有任何样式，
+     * 文字会裸露在页面上闪一下。
+     * 这些规则与 style.css 里的定义一致，只是提前生效。
+     */
+    .update-modal,
+    .update-modal-overlay { opacity: 0; visibility: hidden; position: fixed; }
+    .update-modal.active,
+    .update-modal-overlay.active { opacity: 1; visibility: visible; }
+    .player-container { visibility: hidden; position: fixed; right: -100%; }
+    .player-container.active { visibility: visible; right: 0; }
   </style>
 
   <!--
