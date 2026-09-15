@@ -1029,9 +1029,16 @@ const updateControl = {
       updateList.appendChild(li);
     });
 
+    // Esc 与点击遮罩等价；关闭时把监听器一并摘掉，避免每次弹窗都多挂一个
+    let onKeydown = null;
     const hide = () => {
       overlay.classList.remove('active');
       modal.classList.remove('active');
+      if (onKeydown) document.removeEventListener('keydown', onKeydown);
+    };
+    const bindEscape = dismiss => {
+      onKeydown = e => { if (e.key === 'Escape') dismiss(); };
+      document.addEventListener('keydown', onKeydown);
     };
 
     refreshButton.disabled = false;
@@ -1040,6 +1047,7 @@ const updateControl = {
       const close = () => { hide(); if (onClose) onClose(); };
       refreshButton.onclick = close;
       overlay.onclick = close;
+      bindEscape(close);
     } else {
       refreshButton.textContent = '刷新';
       refreshButton.onclick = () => {
@@ -1047,14 +1055,17 @@ const updateControl = {
         refreshButton.textContent = '更新中...';
         this.reloadForUpdate();
       };
-      overlay.onclick = () => {
+      const dismiss = () => {
         hide();
         try { sessionStorage.setItem(UPDATE_DISMISSED_KEY, data.version); } catch {}
       };
+      overlay.onclick = dismiss;
+      bindEscape(dismiss);
     }
 
     overlay.classList.add('active');
     modal.classList.add('active');
+    refreshButton.focus(); // 对话框弹出后焦点进去，键盘用户才能操作
   },
 
   /**
