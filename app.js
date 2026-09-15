@@ -247,33 +247,51 @@ const musicSource = {
 
   /**
    * 统一封装对数据源后端的 POST 请求：自动加随机 ip、处理网络/HTTP/业务码错误。
+   *
    * @returns {Promise<any>} 接口返回的 data 字段
    */
   async _request(path, body) {
-    let res;
-    try {
-      res = await fetch(`${this._baseUrl}/${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': this._ua,
-        },
-        body: JSON.stringify({ ...body, ip: this._randomIp() }),
-      });
-    } catch (error) {
-      throw new Error('网络请求失败，请检查网络连接后重试');
+    let lastError;
+    // 最多两次：第一次失败（账号轮换导致的偶发 404 等）就重试一次
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        let res;
+        try {
+          res = await fetch(`${this._baseUrl}/${path}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': this._ua,
+            },
+            body: JSON.stringify({ ...body, ip: this._randomIp() }),
+          });
+        } catch {
+          // 网络层失败：通常是临时的，可重试
+          throw Object.assign(new Error('网络请求失败，请检查网络连接后重试'), { retryable: true });
+        }
+        if (!res.ok) throw Object.assign(new Error(`请求失败：HTTP ${res.status}`), { retryable: true });
+        let data;
+        try {
+          data = await res.json();
+        } catch {
+          throw Object.assign(new Error('接口返回的数据无法解析，请稍后重试'), { retryable: true });
+        }
+        if (!data || data.code !== 200) {
+          // 业务码 404（账号轮换）可重试；其它业务错误视为明确错误，不再重试
+          const retryable = data && data.code === 404;
+          throw Object.assign(
+            new Error(data?.message ? `获取失败：${data.message}` : '接口返回异常，请稍后重试'),
+            { retryable }
+          );
+        }
+        return data.data;
+      } catch (error) {
+        lastError = error;
+        // 非可重试错误，或已经是第二次尝试：直接抛出
+        if (!error.retryable || attempt === 1) throw error;
+      }
     }
-    if (!res.ok) throw new Error(`请求失败：HTTP ${res.status}`);
-    let data;
-    try {
-      data = await res.json();
-    } catch {
-      throw new Error('接口返回的数据无法解析，请稍后重试');
-    }
-    if (!data || data.code !== 200) {
-      throw new Error(data?.message ? `获取失败：${data.message}` : '接口返回异常，请稍后重试');
-    }
-    return data.data;
+    throw lastError;
   },
 
   /**
