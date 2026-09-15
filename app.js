@@ -933,7 +933,14 @@ function syncThemeIcon() {
  * 判定依据是 APP_VERSION(代码里写死的)而非 localStorage：只要用户还在跑旧代码就会一直
  * 被提醒；一旦真的拿到新代码，APP_VERSION 自然就对上了。不存在"记了已更新但其实没更新"。
  */
-const UPDATE_DISMISSED_KEY = 'yiclape:update-dismissed';   // sessionStorage，本会话关过的版本
+const UPDATE_DISMISSED_KEY = 'yiclape:update-dismissed';   // sessionStorage，本会话关过的"请刷新"弹窗版本
+
+/**
+ * localStorage，用户最近一次看过更新日志的版本号。
+ * 注意它和早先删掉的 yiclape:version 语义完全不同：那个曾用来决定"要不要提示刷新"，
+ * 会造成"记了已更新其实没更新"的锁死；这个只决定"日志看没看过"，不参与任何更新判断。
+ */
+const CHANGELOG_SEEN_KEY = 'yiclape:changelog-seen';
 
 const updateControl = {
   _checking: false,
@@ -996,15 +1003,24 @@ const updateControl = {
     } catch {}
   },
 
-  showUpdateModal(data) {
+  /**
+   * @param {{version: string, updateTime?: string, changes?: string[]}} data
+   * @param {{mode?: 'refresh'|'changelog', onClose?: Function}} [options]
+   *   refresh   (默认) 线上有新版本，按钮为"刷新"
+   *   changelog 升级后首次打开，按钮为"知道了"，关闭时回调 onClose
+   */
+  showUpdateModal(data, { mode = 'refresh', onClose } = {}) {
     const modal = document.getElementById('updateModal');
     const overlay = document.getElementById('updateOverlay');
+    const title = document.getElementById('updateModalTitle');
     const updateTime = document.getElementById('updateTime');
     const updateList = document.getElementById('updateList');
     const refreshButton = document.getElementById('refreshButton');
     if (!modal || !overlay || !updateTime || !updateList || !refreshButton) return;
     if (modal.classList.contains('active')) return; // 已经在显示了
 
+    const isChangelog = mode === 'changelog';
+    if (title) title.textContent = isChangelog ? '更新内容' : '发现新版本';
     updateTime.textContent = data.updateTime ? `更新时间: ${data.updateTime}` : '';
     updateList.innerHTML = '';
     (Array.isArray(data.changes) ? data.changes : []).forEach(c => {
@@ -1019,25 +1035,59 @@ const updateControl = {
     };
 
     refreshButton.disabled = false;
-    refreshButton.textContent = '刷新';
-    refreshButton.onclick = () => {
-      refreshButton.disabled = true;
-      refreshButton.textContent = '更新中...';
-      this.reloadForUpdate();
-    };
-
-    overlay.onclick = () => {
-      hide();
-      try { sessionStorage.setItem(UPDATE_DISMISSED_KEY, data.version); } catch {}
-    };
+    if (isChangelog) {
+      refreshButton.textContent = '知道了';
+      const close = () => { hide(); if (onClose) onClose(); };
+      refreshButton.onclick = close;
+      overlay.onclick = close;
+    } else {
+      refreshButton.textContent = '刷新';
+      refreshButton.onclick = () => {
+        refreshButton.disabled = true;
+        refreshButton.textContent = '更新中...';
+        this.reloadForUpdate();
+      };
+      overlay.onclick = () => {
+        hide();
+        try { sessionStorage.setItem(UPDATE_DISMISSED_KEY, data.version); } catch {}
+      };
+    }
 
     overlay.classList.add('active');
     modal.classList.add('active');
   },
 
+  /**
+   * 升级后首次打开：展示本版本的更新日志(同一个弹窗，按钮换成"知道了"，不刷新)。
+   *
+   * 为什么需要这个：loader 已经保证新打开的页面总是最新代码，所以"请刷新"弹窗
+   * 只有标签页一直开着的用户才会遇到——绝大多数人再也看不到更新日志。这里补上。
+   * 只在 APP_VERSION 与"上次看过的版本"不同时弹一次；首次访问的新用户没有"更新"可言，
+   * 静默记录当前版本即可。
+   */
+  async showChangelogIfUpgraded() {
+    let seen = null;
+    try { seen = localStorage.getItem(CHANGELOG_SEEN_KEY); } catch { return; }
+
+    const markSeen = () => { try { localStorage.setItem(CHANGELOG_SEEN_KEY, APP_VERSION); } catch {} };
+
+    if (seen === null) { markSeen(); return; }       // 新用户
+    if (seen === APP_VERSION) return;                 // 已看过
+
+    try {
+      const remote = await this.fetchRemote();
+      // 只展示与当前代码同版本的日志；若线上已经又发了新版，交给 checkForUpdate 提示刷新即可
+      if (!remote || remote.version !== APP_VERSION) return;
+      this.showUpdateModal(remote, { mode: 'changelog', onClose: markSeen });
+    } catch (e) {
+      console.error('读取更新日志出错:', e);
+    }
+  },
+
   init() {
     this.stripReloadParam();
-    setTimeout(() => this.checkForUpdate(), 1000);
+    // 先看有没有该展示的更新日志，再开始例行的新版本检查(两者互斥，见 showUpdateModal)
+    setTimeout(() => this.showChangelogIfUpgraded().finally(() => this.checkForUpdate()), 800);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') this.checkForUpdate();
     });
