@@ -1662,7 +1662,7 @@ function initPlayerPage() {
    5. 入口
    ========================================================================== */
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootstrap() {
   // 再次尝试迁移（防御性，初始化时可能 localStorage 暂不可用）
   try {
     runLegacyMigrations();
@@ -1677,4 +1677,13 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     initMainPage();
   }
-});
+}
+
+// 本文件由 <head> 里的 loader 在拿到 update.json 之后动态插入，属于异步脚本：
+// 它执行时 DOMContentLoaded 很可能已经触发过了，再去 addEventListener 只会永远等不到。
+// 所以要先看 readyState：DOM 已就绪就立刻初始化，否则才挂事件。
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
+} else {
+  bootstrap();
+}

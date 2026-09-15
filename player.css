@@ -1,5 +1,5 @@
 @font-face {
-  font-family: 'xnn';
+  font-family: 'Nebulove';
   src: url('./assets/Nebulove.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
@@ -162,7 +162,7 @@ input { width: 100%; }
 button { cursor: pointer; }
 
 html {
-  font-family: 'xnn'; 
+  font-family: 'Nebulove', sans-serif;
   font-size: 10px;
   scroll-behavior: smooth;
 }

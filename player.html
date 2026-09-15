@@ -34,13 +34,13 @@
     }
 
     /* 加载遮罩的关键样式内联在此：player.css 是异步加载的，遮罩不能等它 */
-    html { background-color: hsl(204, 9%, 95%); }
+    html { background-color: hsl(204, 9%, 95%); font-family: sans-serif; } /* player.css 到达后会被 Nebulove 覆盖 */
     html.dark-theme { background-color: hsl(204, 9%, 11%); }
     .loading-overlay {
       position: fixed; inset: 0; z-index: 1000;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       background-color: hsl(204, 9%, 95%); color: hsl(225, 7%, 20%);
-      font: 16px/1.5 sans-serif;
+      font-size: 16px; line-height: 1.5;
       transition: opacity 0.5s ease, visibility 0.5s ease;
     }
     html.dark-theme .loading-overlay { background-color: hsl(204, 9%, 11%); color: hsl(225, 7%, 89%); }
