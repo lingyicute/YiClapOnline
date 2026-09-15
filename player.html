@@ -4,8 +4,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YiClapOnline 播放器</title>
   <link rel="icon" href="./assets/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./player.css">
+  <!-- player.css / app.js 由下方 loader 按 update.json 的版本号带 ?v= 加载，原因见 index.html -->
   <!-- material icon font -->
   <style>
     @font-face {
@@ -27,15 +28,74 @@
       word-wrap: normal;
       direction: ltr;
       -webkit-font-feature-settings: 'liga';
+      font-feature-settings: 'liga';
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
+
+    /* 加载遮罩的关键样式内联在此：player.css 是异步加载的，遮罩不能等它 */
+    html { background-color: hsl(204, 9%, 95%); }
+    html.dark-theme { background-color: hsl(204, 9%, 11%); }
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background-color: hsl(204, 9%, 95%); color: hsl(225, 7%, 20%);
+      font: 16px/1.5 sans-serif;
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+    html.dark-theme .loading-overlay { background-color: hsl(204, 9%, 11%); color: hsl(225, 7%, 89%); }
+    .loading-overlay.hidden { opacity: 0; visibility: hidden; }
+    .loading-spinner { width: 60px; height: 60px; margin-bottom: 20px; }
   </style>
+
+  <!-- 资源加载器，与 index.html 中的同源；说明见 index.html -->
+  <script>
+    (function () {
+      'use strict';
+      var FETCH_TIMEOUT = 6000;
+
+      try {
+        document.documentElement.classList.add(localStorage.getItem('yiclape:darkmode') === '1' ? 'dark-theme' : 'light-theme');
+      } catch (e) {}
+
+      var booted = false;
+      function boot(version) {
+        if (booted) return;
+        booted = true;
+        var q = version ? '?v=' + encodeURIComponent(version) : '';
+
+        var css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = './player.css' + q;
+        document.head.appendChild(css);
+
+        var js = document.createElement('script');
+        js.src = './app.js' + q;
+        js.onerror = function () {
+          var text = document.querySelector('.loading-text');
+          if (text) text.textContent = '播放器脚本加载失败，请检查网络后重试';
+        };
+        document.head.appendChild(js);
+      }
+
+      var timer = setTimeout(function () { boot(null); }, FETCH_TIMEOUT);
+      try {
+        fetch('./update.json?_=' + Date.now(), { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function (j) { clearTimeout(timer); boot(j && j.version ? String(j.version) : null); })
+          .catch(function () { clearTimeout(timer); boot(null); });
+      } catch (e) {
+        clearTimeout(timer);
+        boot(null);
+      }
+    })();
+  </script>
 </head>
 
 <body data-page="player">
   <!-- 加载覆盖层 -->
-  <div class="loading-overlay" id="loadingOverlay">
-    <img src="./assets/loading.svg" alt="加载中" class="loading-spinner">
+  <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
+    <img src="./assets/loading.svg" alt="" class="loading-spinner">
     <div class="loading-text">正在加载音乐信息...</div>
   </div>
 
@@ -61,7 +121,7 @@
             <div class="seek-control">
               <div class="seek-wrapper">
                 <div class="range-wrapper">
-                  <input type="range" step="1" max="60" value="0" class="range" data-range data-seek>
+                  <input type="range" min="0" step="1" max="60" value="0" class="range" data-range data-seek aria-label="播放进度">
 
                   <div class="range-fill"></div>
                 </div>
@@ -78,25 +138,25 @@
             </div>
 
             <div class="player-control wrapper">
-              <button class="btn-icon play" data-play-btn>
-                <span class="material-symbols-rounded default-icon">play_arrow</span>
-                <span class="material-symbols-rounded active-icon">pause</span>
+              <button class="btn-icon play" type="button" data-play-btn aria-label="播放">
+                <span class="material-symbols-rounded default-icon" aria-hidden="true">play_arrow</span>
+                <span class="material-symbols-rounded active-icon" aria-hidden="true">pause</span>
               </button>
 
-              <button class="btn-icon" data-favorite>
-                <span class="material-symbols-rounded">favorite_border</span>
+              <button class="btn-icon" type="button" data-favorite aria-label="收藏" aria-pressed="false">
+                <span class="material-symbols-rounded" aria-hidden="true">favorite_border</span>
               </button>
 
-              <button class="btn-icon" data-download>
-                <span class="material-symbols-rounded">download</span>
+              <button class="btn-icon" type="button" data-download aria-label="下载">
+                <span class="material-symbols-rounded" aria-hidden="true">download</span>
               </button>
 
-              <button class="btn-icon toggle" data-loop>
-                <span class="material-symbols-rounded">repeat_one</span>
+              <button class="btn-icon toggle" type="button" data-loop aria-label="单曲循环" aria-pressed="false">
+                <span class="material-symbols-rounded" aria-hidden="true">repeat_one</span>
               </button>
 
-              <button class="btn-icon toggle" data-theme-toggle>
-                <span class="material-symbols-rounded">dark_mode</span>
+              <button class="btn-icon toggle" type="button" data-theme-toggle aria-label="切换主题">
+                <span class="material-symbols-rounded" aria-hidden="true">dark_mode</span>
               </button>
             </div>
           </div>
@@ -104,8 +164,6 @@
       </div>
     </article>
   </main>
-
-  <script src="./app.js"></script>
 
 </body>
 

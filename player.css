@@ -100,15 +100,22 @@
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
-/* 主题切换动画 */
-body, 
-.player, 
-.music-banner, 
-.btn-icon, 
-.range-fill, 
-.range::-webkit-slider-thumb, 
+/* 主题切换动画：只过渡颜色相关属性，transition: all 会把尺寸/位移变化也拖慢 */
+body,
+.player,
+.music-banner,
+.btn-icon,
+.range-fill,
 .player-control .play {
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
 }
 
 
@@ -170,7 +177,7 @@ body {
   background-size: cover;
   background-repeat: no-repeat;
   background-position: center;
-  overflow: overlay;
+  overflow: auto;
 }
 
 ::-webkit-scrollbar { width: 8px; }
@@ -216,8 +223,12 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .btn-icon:hover { background-color: var(--on-surface-variant-hover); }
 
-.btn-icon:is(:focus, :focus-visible) {
+.btn-icon:focus { outline: none; }
+
+.btn-icon:focus-visible {
   background-color: var(--on-surface-variant-focus);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .img-cover {
@@ -230,11 +241,15 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 .headline-sm {
   font-size: var(--headline-sm);
   font-weight: var(--fw-400);
+  overflow-wrap: anywhere; /* 超长无空格标题不要把布局撑出屏幕 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
-.label-md { font-weight: var(--fw-500); }
-
 .label-md {
+  font-weight: var(--fw-500);
   font-size: var(--label-md);
   letter-spacing: 0.5px;
 }
@@ -316,7 +331,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   align-self: flex-start;
   overflow: hidden;
   border-radius: var(--radius-24);
-  object-fit: contain;
 }
 
 .artist {
@@ -364,7 +378,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 }
 
 .range-fill {
-  content: "";
   position: absolute;
   top: 0;
   left: 0;
@@ -389,9 +402,37 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   box-shadow: 0 0 0 12px var(--on-surface-variant-hover);
 }
 
-.range::-webkit-slider-thumb:is(:focus, :focus-visible) {
+.range:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 12px var(--on-surface-variant-focus);
 }
+
+/* Firefox：伪元素名不同，且不支持在同一条规则里与 -webkit- 混写(整条规则会被丢弃) */
+.range::-moz-range-track {
+  background-color: var(--surface-variant);
+  height: 6px;
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-pill);
+}
+
+.range::-moz-range-thumb {
+  background-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius-pill);
+  transition: var(--transition-1);
+}
+
+.range::-moz-range-thumb:hover {
+  box-shadow: 0 0 0 12px var(--on-surface-variant-hover);
+}
+
+.range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 12px var(--on-surface-variant-focus);
+}
+
+.range:focus { outline: none; } /* 焦点样式由上面的 thumb box-shadow 提供 */
 
 .duration-label {
   justify-content: space-between;
@@ -478,12 +519,11 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
  * responsive for large than 575px screen
  */
 @media (min-width: 575px) {
-  body { }
   .player .container { max-width: 540px; }
 }
 
 /* 中等屏幕布局 (575px-992px) */
-@media (min-width: 575px) and (max-width: 991px) {
+@media (min-width: 575px) and (max-width: 991.98px) {
   .player { justify-content: flex-start; }
   
   .player .container {
@@ -525,7 +565,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 }
 
 /* 小屏幕样式 (小于575px) */
-@media (max-width: 575px) {
+@media (max-width: 574.98px) {
   .player { 
     --padding: 16px; 
     justify-content: flex-start !important;
@@ -598,8 +638,8 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
  * responsive for large than 992px screen
  */
 @media (min-width: 992px) {
-  /* 修改自定义属性 */
-  :root, :root.light-theme {
+  /* 修改自定义属性(两种主题都要生效) */
+  :root, :root.light-theme, :root.dark-theme {
     --headline-sm: 4.2rem;
   }
   

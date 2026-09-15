@@ -1,14 +1,22 @@
 'use strict';
 
 /**
+ * 当前这份代码的版本号。必须与 update.json 里的 version 一致；发版时用 bump.sh 同步改。
+ *
+ * 更新检测就是拿它和线上 update.json 比：不一致 => 用户跑的是旧代码 => 提示刷新。
+ */
+const APP_VERSION = '202609150001';
+
+/**
  * YiClapOnline —— 主页(index.html)与播放器(player.html)共用的唯一脚本。
  *
  * 两个页面都加载本文件，靠 <body data-page="main|player"> 分流。
  * 因此不存在跨文件的加载顺序问题：任何页面拿到的一定是完整定义。
  *
  * 文件结构：
- *   1. 共享层     localStorage(主题/版本/收藏) + 旧 cookie 迁移清理
+ *   1. 共享层     localStorage(主题/版本) + 旧 cookie 迁移清理
  *   2. 数据源层   musicSource —— 换源只需要改这一节
+ *   2.5 收藏      依赖 musicSource.id 做"换源即作废"，所以放在数据源之后
  *   3. 主页       搜索、结果列表、收藏列表
  *   4. 播放器     取歌、播放控制、音量
  *   5. 入口
@@ -20,38 +28,43 @@
 
 // 新的统一存储键（yiclape: 前缀）
 const THEME_KEY = 'yiclape:darkmode';
-const VERSION_KEY = 'yiclape:version';
 const FAVORITES_KEY = 'yiclape:favorites';
-const LEGACY_FAVORITES_KEYS = ['li-favorites'];   // 只删不读
+// 只删不读：旧的收藏键，以及旧更新逻辑留下的版本簿记(现在用 APP_VERSION 直接比对，不再需要)
+const LEGACY_STORAGE_KEYS = ['li-favorites', 'yiclape:version'];
+const LEGACY_SESSION_KEYS = ['yiclape:updating'];
 
-// 遗留 cookie 名称（已迁移至 localStorage，保留此处仅用于迁移与清理）
+// 遗留 cookie 名称（主题已迁移至 localStorage；版本 cookie 直接删除）
 const LEGACY_THEME_COOKIE = 'li-darkmode';
 const LEGACY_VERSION_COOKIE = 'li-version';
 
-/** 
+/**
  * cookie 读写 - 仅用于遗留数据迁移和清理
  * 新功能请直接使用 localStorage
+ *
+ * 注意：不能叫 cookieStore —— 浏览器已经把 window.cookieStore 定义成了
+ * Cookie Store API 的全局对象。顶层 const 会遮蔽它，在某些环境下报错。
  */
-const cookieStore = {
+const legacyCookies = {
   get(name) {
     const prefix = name + '=';
     for (const part of document.cookie.split(';')) {
       const cookie = part.trim();
       if (cookie.startsWith(prefix)) {
-        return decodeURIComponent(cookie.slice(prefix.length));
+        try {
+          return decodeURIComponent(cookie.slice(prefix.length));
+        } catch {
+          // 老版本 cookie 里的中文可能没有 encode 过，decode 会抛 URIError；原样返回即可
+          return cookie.slice(prefix.length);
+        }
       }
     }
     return null;
   },
 
-  set(name, value, days = 365) {
-    const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
-    const secure = location.protocol === 'https:' ? '; secure' : '';
-    document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax${secure}`;
-  },
-
   remove(name) {
-    this.set(name, '', -1);
+    // 只做删除。旧版本写 cookie 时用的就是 path=/ 且未指定 domain，这里保持一致才能真正删掉
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;SameSite=Lax${secure}`;
   }
 };
 
@@ -78,8 +91,8 @@ function migrateCookieToLocalStorage(cookieName, storageKey) {
     if (existing !== null) {
       // 已迁移，只需清理遗留 cookie
       try {
-        if (cookieStore.get(cookieName) !== null) {
-          cookieStore.remove(cookieName);
+        if (legacyCookies.get(cookieName) !== null) {
+          legacyCookies.remove(cookieName);
           console.log(`[迁移] 清理已迁移的遗留 cookie: ${cookieName}`);
         }
       } catch (e) {
@@ -88,7 +101,7 @@ function migrateCookieToLocalStorage(cookieName, storageKey) {
       return existing;
     }
 
-    const cookieVal = cookieStore.get(cookieName);
+    const cookieVal = legacyCookies.get(cookieName);
     if (cookieVal !== null) {
       try {
         localStorage.setItem(storageKey, cookieVal);
@@ -98,7 +111,7 @@ function migrateCookieToLocalStorage(cookieName, storageKey) {
       }
       // 写入成功后再删 cookie
       try {
-        cookieStore.remove(cookieName);
+        legacyCookies.remove(cookieName);
         console.log(`[迁移] 已将 ${cookieName} -> ${storageKey}: ${cookieVal}，并删除原 cookie`);
       } catch (e) {
         console.warn(`[迁移] 删除 cookie 失败 ${cookieName}:`, e);
@@ -113,7 +126,6 @@ function migrateCookieToLocalStorage(cookieName, storageKey) {
 
 function runLegacyMigrations() {
   migrateCookieToLocalStorage(LEGACY_THEME_COOKIE, THEME_KEY);
-  migrateCookieToLocalStorage(LEGACY_VERSION_COOKIE, VERSION_KEY);
 }
 
 // 页面加载时立即尝试迁移，避免主题闪烁
@@ -124,22 +136,41 @@ try {
 }
 
 /**
+ * 把任意 id 统一成非空字符串（null/undefined -> ''）。
+ * 数据源若返回数字 id，之前 add() 会原样存进去、read() 又只认字符串，
+ * 结果是"收藏成功但列表里永远看不到"。所有入口统一走这里即可。
+ */
+function normalizeId(value) {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+/**
  * 主题控制 - 读取 localStorage['yiclape:darkmode'] 并应用相应主题
  * '1': 深色主题, 其它/不存在: 浅色主题(默认)
  * 已从 cookie 迁移至 localStorage，旧 cookie 会在迁移后自动删除
  */
 const themeControl = {
+  /**
+   * 内存态兜底：localStorage 被禁用时 isDark() 永远是 false，
+   * 原来的 toggleTheme() 就变成"点了没反应"。现在至少当前页面内可以切换。
+   */
+  _dark: null,
+
   isDark() {
     try {
-      return localStorage.getItem(THEME_KEY) === '1';
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored !== null) return stored === '1';
     } catch {
-      return false;
+      /* 读不到就用内存态 */
     }
+    return this._dark === true;
   },
 
   toggleTheme() {
+    const next = !this.isDark();
+    this._dark = next;
     try {
-      localStorage.setItem(THEME_KEY, this.isDark() ? '0' : '1');
+      localStorage.setItem(THEME_KEY, next ? '1' : '0');
     } catch (e) {
       console.error('[主题] 保存失败(浏览器可能禁用了 localStorage 或空间已满):', e);
     }
@@ -158,10 +189,12 @@ const themeControl = {
   init(onChange) {
     this.applyTheme();
 
-    // 使用 storage 事件实现跨标签/iframe 同步，替代旧的轮询方案
-    // localStorage 变更会触发 storage 事件，比轮询更高效、实时
+    // 使用 storage 事件实现跨标签/iframe 同步。
+    // key === null 表示对方调用了 localStorage.clear()，同样需要重新应用
     window.addEventListener('storage', (event) => {
-      if (event.key === THEME_KEY) {
+      if (event.storageArea !== localStorage) return;
+      if (event.key === THEME_KEY || event.key === null) {
+        this._dark = null;
         this.applyTheme();
         if (onChange) onChange(this.isDark());
       }
@@ -169,134 +202,8 @@ const themeControl = {
   }
 };
 
-/**
- * 收藏 —— 只用 localStorage
- *
- * 存储结构：localStorage['yiclape:favorites'] = JSON.stringify({ source, items })
- *   items: [{ id, title, artist }]   // id 是当前数据源给的不透明字符串
- *
- * source 字段就是"作废开关"：收藏里的 id 只在当前数据源内有效，换源之后必然全是死链，
- * 所以读取时拿 musicSource.name 比对，不一致就当没有收藏并清掉旧数据。
- * 历史上的 li-favorites cookie / li-favorites localStorage 均已废弃，一律不读，见到就删。
- */
-const favorites = {
-  /**
-   * 当前数据源标识。优先用 musicSource.id(稳定标识)，没有才退回 name。
-   * name 按约定只用于展示，改个显示名不该把收藏清空；两者都没有时退化成空串。
-   */
-  sourceTag() {
-    return (musicSource && (musicSource.id || musicSource.name)) || '';
-  },
-
-  /** 收藏列表；脏数据 / 存储不可用一律退化成 []，绝不向外抛 */
-  read() {
-    try {
-      const raw = localStorage.getItem(FAVORITES_KEY);
-      if (raw === null) return [];
-
-      const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.items)) return [];
-      if (data.source !== this.sourceTag()) {
-        this.clear();          // 换数据源了，旧收藏整体作废
-        return [];
-      }
-
-      return data.items
-        .filter(item => item && typeof item.id === 'string' && item.id)
-        .map(({ id, title, artist }) => ({
-          id,
-          title: typeof title === 'string' ? title : '',
-          artist: typeof artist === 'string' ? artist : '',
-        }));
-    } catch (error) {
-      console.error('[收藏] 读取失败，按空列表处理:', error);
-      return [];
-    }
-  },
-
-  /** 整体写回；浏览器禁用存储或配额满时返回 false，由调用方提示 */
-  write(items) {
-    try {
-      localStorage.setItem(FAVORITES_KEY, JSON.stringify({ source: this.sourceTag(), items }));
-      return true;
-    } catch (error) {
-      console.error('[收藏] 保存失败(浏览器可能禁用了 localStorage 或空间已满):', error);
-      return false;
-    }
-  },
-
-  clear() {
-    try {
-      localStorage.removeItem(FAVORITES_KEY);
-    } catch (error) {
-      console.error('[收藏] 清除失败:', error);
-    }
-  },
-
-  has(songId) {
-    return !!songId && this.read().some(item => item.id === songId);
-  },
-
-  add({ id, title, artist } = {}) {
-    if (!id || this.has(id)) return false;
-
-    const items = this.read();
-    items.push({ id, title: title || '', artist: artist || '' });
-    return this.write(items);
-  },
-
-  remove(songId) {
-    if (!songId) return false;
-
-    const items = this.read();
-    const remaining = items.filter(item => item.id !== songId);
-    if (remaining.length === items.length) return false;
-
-    return this.write(remaining);
-  },
-
-  /**
-   * 收藏/取消收藏一次搞定，避免"读-判断-写"两步之间的竞态。
-   * @returns {boolean} 操作完成后这首歌的真实收藏状态(以存储为准，写失败会退回原状)
-   */
-  toggle({ id, title, artist } = {}) {
-    if (!id) return false;
-
-    this.has(id) ? this.remove(id) : this.add({ id, title, artist });
-    return this.has(id);
-  },
-
-  /** 启动清理：历史遗留的收藏 cookie 与旧 localStorage 键，只删不读 */
-  purgeLegacy() {
-    for (const key of LEGACY_FAVORITES_KEYS) {
-      try {
-        localStorage.removeItem(key);
-      } catch (error) {
-        console.warn('[收藏] 旧 localStorage 键清除失败:', error);
-      }
-
-      // 历史上这些 key 一律写在 path=/ 下，所以一次过期删除即可覆盖
-      try {
-        cookieStore.remove(key);
-      } catch (e) {
-        console.warn('[收藏] 旧 cookie 清除失败:', e);
-      }
-    }
-
-    // 防御性清理：主题和版本的旧 cookie 理应在 runLegacyMigrations 中已删，
-    // 此处再次确保旧 cookie 不会残留
-    try {
-      if (localStorage.getItem(THEME_KEY) !== null) {
-        cookieStore.remove(LEGACY_THEME_COOKIE);
-      }
-    } catch {}
-    try {
-      if (localStorage.getItem(VERSION_KEY) !== null) {
-        cookieStore.remove(LEGACY_VERSION_COOKIE);
-      }
-    } catch {}
-  }
-};
+// 脚本一解析就先把主题类挂到 <html> 上，不等 DOMContentLoaded，减少浅色->深色的闪烁
+themeControl.applyTheme();
 
 /* ==========================================================================
    2. 数据源层 —— 全站唯一与外部音乐服务打交道的地方
@@ -320,7 +227,7 @@ const musicSource = {
 
   /**
    * 数据源稳定标识，写进收藏数据里用于"换源即作废"。
-   * 换数据源时请改这个值(如 'gequbao' -> 'newapi')，老收藏会被整体丢弃；
+   * 换数据源时改这个值，老收藏即被整体丢弃；
    * 留空则退化成用 name。
    */
   id: '',
@@ -386,6 +293,144 @@ const musicSource = {
   }
 };
 
+/**
+ * 收藏 —— 只用 localStorage
+ *
+ * 存储结构：localStorage['yiclape:favorites'] = JSON.stringify({ source, items })
+ *   items: [{ id, title, artist }]   // id 是当前数据源给的不透明字符串
+ *
+ * source 字段就是"作废开关"：收藏里的 id 只在当前数据源内有效，换源之后必然全是死链，
+ * 所以读取时拿 sourceTag()(musicSource.id，退回 name)比对，不一致就当没有收藏并清掉旧数据。
+ * 历史上的 li-favorites cookie / li-favorites localStorage 均已废弃，一律不读，见到就删。
+ */
+const favorites = {
+  /**
+   * 当前数据源标识。优先用 musicSource.id(稳定标识)，没有才退回 name。
+   * name 按约定只用于展示，改个显示名不该把收藏清空；两者都没有时退化成空串。
+   */
+  sourceTag() {
+    return musicSource.id || musicSource.name || '';
+  },
+
+  /** 收藏列表；脏数据 / 存储不可用一律退化成 []，绝不向外抛 */
+  read() {
+    try {
+      const raw = localStorage.getItem(FAVORITES_KEY);
+      if (raw === null) return [];
+
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.items)) return [];
+      if (data.source !== this.sourceTag()) {
+        this.clear();          // 换数据源了，旧收藏整体作废
+        return [];
+      }
+
+      // 数字 id 也接受(旧数据可能存的是数字)，统一转成字符串再比对
+      const seen = new Set();
+      const items = [];
+      for (const item of data.items) {
+        if (!item) continue;
+        const id = normalizeId(item.id);
+        if (!id || seen.has(id)) continue;   // 顺手去重，避免脏数据导致同一首歌出现两行
+        seen.add(id);
+        items.push({
+          id,
+          title: typeof item.title === 'string' ? item.title : '',
+          artist: typeof item.artist === 'string' ? item.artist : '',
+        });
+      }
+      return items;
+    } catch (error) {
+      console.error('[收藏] 读取失败，按空列表处理:', error);
+      return [];
+    }
+  },
+
+  /** 整体写回；浏览器禁用存储或配额满时返回 false，由调用方提示 */
+  write(items) {
+    try {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify({ source: this.sourceTag(), items }));
+      return true;
+    } catch (error) {
+      console.error('[收藏] 保存失败(浏览器可能禁用了 localStorage 或空间已满):', error);
+      return false;
+    }
+  },
+
+  clear() {
+    try {
+      localStorage.removeItem(FAVORITES_KEY);
+    } catch (error) {
+      console.error('[收藏] 清除失败:', error);
+    }
+  },
+
+  has(songId) {
+    const id = normalizeId(songId);
+    return !!id && this.read().some(item => item.id === id);
+  },
+
+  add({ id, title, artist } = {}) {
+    id = normalizeId(id);
+    if (!id) return false;
+
+    const items = this.read();
+    if (items.some(item => item.id === id)) return false;   // 只读一次，不再 has()+read() 读两遍
+
+    items.push({
+      id,
+      title: typeof title === 'string' ? title : '',
+      artist: typeof artist === 'string' ? artist : '',
+    });
+    return this.write(items);
+  },
+
+  remove(songId) {
+    const id = normalizeId(songId);
+    if (!id) return false;
+
+    const items = this.read();
+    const remaining = items.filter(item => item.id !== id);
+    if (remaining.length === items.length) return false;
+
+    return this.write(remaining);
+  },
+
+  /**
+   * 收藏/取消收藏一次搞定。
+   * @returns {boolean} 操作完成后这首歌的真实收藏状态(以存储为准，写失败会退回原状)
+   */
+  toggle({ id, title, artist } = {}) {
+    id = normalizeId(id);
+    if (!id) return false;
+
+    if (this.has(id)) {
+      this.remove(id);
+    } else {
+      this.add({ id, title, artist });
+    }
+    return this.has(id);
+  },
+
+  /** 启动清理：历史遗留的 cookie / localStorage / sessionStorage 键，只删不读 */
+  purgeLegacy() {
+    for (const key of LEGACY_STORAGE_KEYS) {
+      try { localStorage.removeItem(key); } catch {}
+      // 历史上这些 key 一律写在 path=/ 下，所以一次过期删除即可覆盖
+      try { legacyCookies.remove(key); } catch {}
+    }
+    for (const key of LEGACY_SESSION_KEYS) {
+      try { sessionStorage.removeItem(key); } catch {}
+    }
+    try { legacyCookies.remove(LEGACY_VERSION_COOKIE); } catch {}
+
+    // 防御性清理：主题的旧 cookie 理应在 runLegacyMigrations 中已删，此处再次确保不残留
+    try {
+      if (localStorage.getItem(THEME_KEY) !== null) legacyCookies.remove(LEGACY_THEME_COOKIE);
+    } catch {}
+  }
+};
+
 /* ==========================================================================
    3. 主页
    ========================================================================== */
@@ -396,22 +441,58 @@ let resultsContainer, resultsList, noResults, placeholder;
 let playerContainer, playerFrame, favoritesContainer, favoritesList;
 let themeToggleBtn;
 
+// 收藏面板是否处于打开状态。之前用 favoritesContainer.style.display 判断，
+// 但收藏为空时显示的是 noResults 提示而不是 favoritesContainer，
+// 于是"打开了收藏 -> 列表为空 -> 再点一次收藏按钮"会被当成"没打开"而重复打开。
+let favoritesOpen = false;
+
+// 打开收藏面板前正在显示的容器，关闭时回到它(而不是靠 .result-count 是否存在来猜)
+let viewBeforeFavorites = null;
+
+// 搜索请求序号：用户快速连按两次回车时，只接受最后一次请求的结果，避免旧结果覆盖新结果
+let searchSeq = 0;
+
+// 关闭播放器时延迟清空 iframe 的定时器；再次播放时要取消，否则新歌会被这个迟到的定时器清掉
+let closePlayerTimer = null;
+
 /**
  * 通用容器控制 - 管理容器的显示和隐藏
+ *
+ * 淡入淡出全部交给 .fade-in / .fade-out 两个类，不再往元素上写 inline opacity：
+ * 之前 showContainer 写了 style.opacity = '1'，内联样式优先级高于 .fade-out 的 opacity: 0，
+ * 结果是淡出动画从第二次开始就永远不生效（只剩 visibility 在 0.5s 后瞬间切换）。
  */
 const containerControl = {
+  /** 每个容器最近一次 hide 的定时器，show 时取消，避免"先隐藏后显示"被迟到的 hide 回调又藏起来 */
+  _pendingHide: new WeakMap(),
+
+  /** 容器是否处于可见状态(display 不为 none 且不在淡出过程中) */
+  isVisible(container) {
+    return !!container
+      && container.style.display !== 'none'
+      && !container.classList.contains('fade-out');
+  },
+
   hideContainer(container, callback) {
     if (!container || container.style.display === 'none') {
       if (callback) callback();
       return;
     }
 
+    // 已经在淡出中：不重复起定时器，直接回调即可
+    if (this._pendingHide.has(container)) {
+      if (callback) callback();
+      return;
+    }
+
     container.classList.remove('fade-in');
     container.classList.add('fade-out');
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this._pendingHide.delete(container);
       container.style.display = 'none';
       if (callback) callback();
     }, 500);
+    this._pendingHide.set(container, timer);
   },
 
   showContainer(container, callback) {
@@ -420,14 +501,27 @@ const containerControl = {
       return;
     }
 
-    container.style.opacity = '0';
-    container.style.display = container === noResults ? 'flex' : 'block';
-    setTimeout(() => {
+    // 若正处于淡出中，取消那次隐藏，否则 500ms 后会把刚显示的容器又藏掉
+    const pending = this._pendingHide.get(container);
+    if (pending !== undefined) {
+      clearTimeout(pending);
+      this._pendingHide.delete(container);
+    }
+
+    // .no-results / .placeholder 在 CSS 里都是 flex 布局，不能一律写成 block
+    const useFlex = container === noResults || container === placeholder;
+
+    // 先以"透明"状态摆进布局，下一帧再切到 fade-in，浏览器才会播放过渡
+    container.classList.remove('fade-in');
+    container.classList.add('fade-out');
+    container.style.display = useFlex ? 'flex' : 'block';
+    void container.offsetWidth; // 强制回流，确保 fade-out 状态已经生效
+
+    requestAnimationFrame(() => {
       container.classList.remove('fade-out');
       container.classList.add('fade-in');
-      container.style.opacity = '1';
       if (callback) callback();
-    }, 10);
+    });
   },
 
   // 隐藏除 exceptContainer 之外的所有容器，全部隐藏完成后执行 callback
@@ -490,16 +584,21 @@ function showNotice(message) {
  * 创建带图标的圆形按钮
  * @param {string} className - 按钮 class
  * @param {string} icon - Material Symbols 图标名
+ * @param {string} label - 无障碍标签(aria-label / title)
  * @param {Object} dataset - 要写入的 data-* 属性(camelCase)
  * @returns {HTMLButtonElement}
  */
-function iconButton(className, icon, dataset) {
+function iconButton(className, icon, label, dataset) {
   const button = document.createElement('button');
+  button.type = 'button';
   button.className = className;
+  button.setAttribute('aria-label', label);
+  button.title = label;
   Object.assign(button.dataset, dataset);
 
   const span = document.createElement('span');
   span.className = 'material-symbols-rounded';
+  span.setAttribute('aria-hidden', 'true');
   span.textContent = icon;
   button.appendChild(span);
 
@@ -518,17 +617,19 @@ function buildSongRow({ id, title, artist }, removable) {
 
   const titleEl = document.createElement('div');
   titleEl.className = 'result-title';
-  titleEl.textContent = title;
+  titleEl.textContent = title || '未知歌曲';
+  titleEl.title = title || '';
 
   const artistEl = document.createElement('div');
   artistEl.className = 'result-artist';
-  artistEl.textContent = artist;
+  artistEl.textContent = artist || '未知歌手';
+  artistEl.title = artist || '';
 
   const actionEl = document.createElement('div');
   actionEl.className = 'result-action';
-  actionEl.appendChild(iconButton('play-button', 'play_arrow', { songId: id }));
+  actionEl.appendChild(iconButton('play-button', 'play_arrow', '播放', { songId: id }));
   if (removable) {
-    actionEl.appendChild(iconButton('remove-button', 'delete', { songId: id }));
+    actionEl.appendChild(iconButton('remove-button', 'delete', '取消收藏', { songId: id }));
   }
 
   row.append(titleEl, artistEl, actionEl);
@@ -540,16 +641,21 @@ function buildSongRow({ id, title, artist }, removable) {
  * @param {string} query - 搜索关键词
  */
 async function performSearch(query) {
-  try {
-    if (!query) return;
+  if (!query) return;
 
-    setLoading(true);
-    displaySearchResults(await musicSource.search(query));
+  favoritesOpen = false; // 一旦发起新搜索，收藏面板视为已关闭(无论后续是结果、空还是出错)
+  const seq = ++searchSeq;
+  setLoading(true);
+  try {
+    const results = await musicSource.search(query);
+    if (seq !== searchSeq) return; // 期间又发起了新搜索，丢弃这次的过期结果
+    displaySearchResults(results);
   } catch (error) {
+    if (seq !== searchSeq) return;
     console.error('搜索出错:', error);
-    displayError(error.message || '搜索过程中发生错误，请稍后重试');
+    displayError(error?.message || '搜索过程中发生错误，请稍后重试');
   } finally {
-    setLoading(false);
+    if (seq === searchSeq) setLoading(false);
   }
 }
 
@@ -558,38 +664,86 @@ async function performSearch(query) {
  * @param {Array} results - 搜索结果数组
  */
 function displaySearchResults(results) {
+  // 数据源实现不规范(返回 null / 对象)时按空结果处理，别让页面直接报 TypeError
+  const list = Array.isArray(results)
+    ? results.filter(r => r && normalizeId(r.id))
+    : [];
+
   // 空结果时不能把 resultsContainer 当作 hideAllContainers 的例外容器，
   // 否则上一次的搜索结果会残留在页面上、与提示同时显示。
-  // 复用 displayError：先隐藏全部容器（含旧结果列表），再显示提示。
-  if (results.length === 0) {
+  if (list.length === 0) {
+    resultsList.innerHTML = '';
+    resultsContainer.querySelector('.result-count')?.remove();
     displayError('未找到相关歌曲，请尝试其他关键词。');
     return;
   }
 
   containerControl.hideAllContainers(resultsContainer, () => {
     resultsList.innerHTML = '';
-    results.forEach(result => resultsList.appendChild(buildSongRow(result)));
-    setCount(resultsContainer, `找到 ${results.length} 个结果`);
+    const fragment = document.createDocumentFragment();
+    list.forEach(result => fragment.appendChild(buildSongRow({
+      id: normalizeId(result.id),
+      title: result.title,
+      artist: result.artist,
+    })));
+    resultsList.appendChild(fragment);
+    setCount(resultsContainer, `找到 ${list.length} 个结果`);
     reveal(resultsContainer);
   });
+}
+
+/**
+ * 只重绘收藏列表的内容，不做容器切换动画
+ * @returns {number} 收藏数量
+ */
+function renderFavoritesList() {
+  const items = favorites.read();
+  favoritesList.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  items.forEach(item => fragment.appendChild(buildSongRow(item, true)));
+  favoritesList.appendChild(fragment);
+  setCount(favoritesContainer, `共有 ${items.length} 首收藏歌曲`);
+  return items.length;
 }
 
 /**
  * 显示收藏列表
  */
 function displayFavorites() {
-  containerControl.hideAllContainers(null, () => {
-    const items = favorites.read();
+  favoritesOpen = true;
 
-    if (items.length === 0) {
+  // 收藏列表已经开着(例如播放器里点了爱心触发的刷新)：原地重绘即可，不要整个面板淡出再淡入
+  if (containerControl.isVisible(favoritesContainer)) {
+    if (renderFavoritesList() === 0) {
+      containerControl.hideContainer(favoritesContainer, () => showNotice('暂无收藏歌曲'));
+    }
+    return;
+  }
+
+  containerControl.hideAllContainers(null, () => {
+    if (renderFavoritesList() === 0) {
       showNotice('暂无收藏歌曲');
       return;
     }
-
-    favoritesList.innerHTML = '';
-    items.forEach(item => favoritesList.appendChild(buildSongRow(item, true)));
-    setCount(favoritesContainer, `共有 ${items.length} 首收藏歌曲`);
     reveal(favoritesContainer);
+  });
+}
+
+/**
+ * 关闭收藏面板，回到打开前的界面
+ */
+function closeFavorites() {
+  favoritesOpen = false;
+
+  // 回到之前的界面；若之前的界面已不存在(如结果被清空)，退回占位区
+  let target = viewBeforeFavorites;
+  if (target === resultsContainer && resultsList.children.length === 0) target = placeholder;
+  // noResults 的文案可能已被“暂无收藏歌曲”覆盖，回去会显示错误提示，一律退回占位区
+  if (!target || target === favoritesContainer || target === noResults) target = placeholder;
+  viewBeforeFavorites = null;
+
+  containerControl.hideAllContainers(target, () => {
+    if (!containerControl.isVisible(target)) containerControl.showContainer(target);
   });
 }
 
@@ -598,8 +752,32 @@ function displayFavorites() {
  * @param {string} id - 数据源歌曲 ID
  */
 function playTrack(id) {
+  id = normalizeId(id);
+  if (!id) return;
+
+  // 取消"关闭播放器后延迟清空 iframe"的定时器，否则 300ms 内再次播放会被它清掉
+  if (closePlayerTimer !== null) {
+    clearTimeout(closePlayerTimer);
+    closePlayerTimer = null;
+  }
+
   playerFrame.src = `./player.html?id=${encodeURIComponent(id)}`;
+  // 收起/展开时的可访问性由 CSS 的 visibility 负责(隐藏时自动移出 Tab 顺序与无障碍树)
   playerContainer.classList.add('active');
+}
+
+/**
+ * 关闭播放器
+ */
+function closePlayer() {
+  playerContainer.classList.remove('active');
+
+  // 等滑出动画结束再卸载 iframe，音乐随之停止
+  if (closePlayerTimer !== null) clearTimeout(closePlayerTimer);
+  closePlayerTimer = setTimeout(() => {
+    closePlayerTimer = null;
+    playerFrame.src = 'about:blank';
+  }, 300);
 }
 
 /**
@@ -607,29 +785,43 @@ function playTrack(id) {
  * @param {string} id - 歌曲ID
  */
 function removeFavoriteRow(id) {
-  favorites.remove(id);
-  const remaining = favorites.read();
-
   // 用属性比对而非拼选择器，避免 id 中的特殊字符破坏选择器
   const button = [...favoritesList.querySelectorAll('.remove-button')]
     .find(el => el.dataset.songId === id);
   const row = button?.closest('.result-item');
+
+  // 连点两次同一个删除按钮：第二次直接忽略，动画正在进行
+  if (row?.dataset.removing) return;
+
+  if (!favorites.remove(id)) {
+    displayFavorites(); // 存储写失败或该项已不存在：以存储为准整表重绘，避免 UI 与数据不一致
+    return;
+  }
+  const remaining = favorites.read();
 
   if (!row) {
     displayFavorites(); // 找不到对应行时整表重绘兜底
     return;
   }
 
-  // 淡出并收起该行
+  row.dataset.removing = '1';
+  button.disabled = true;
+
+  // 淡出并收起该行。height 从 auto 到 0 不会有过渡，先固定成当前像素高度再压到 0
+  row.style.height = `${row.offsetHeight}px`;
+  row.style.overflow = 'hidden';
+  void row.offsetHeight; // 强制回流，让上面的高度先生效
   row.style.transition = 'opacity 0.3s, height 0.3s, margin 0.3s, padding 0.3s';
-  Object.assign(row.style, { opacity: '0', height: '0', margin: '0', padding: '0', overflow: 'hidden' });
+  Object.assign(row.style, { opacity: '0', height: '0', margin: '0', padding: '0' });
 
   setTimeout(() => {
     row.remove();
 
     if (remaining.length === 0) {
       favoritesList.innerHTML = '';
-      containerControl.hideContainer(favoritesContainer, () => showNotice('暂无收藏歌曲'));
+      containerControl.hideContainer(favoritesContainer, () => {
+        if (favoritesOpen) showNotice('暂无收藏歌曲');
+      });
       return;
     }
 
@@ -660,9 +852,10 @@ function displayError(message) {
  * @param {boolean} isLoading - 是否正在加载
  */
 function setLoading(isLoading) {
-  searchText.style.display = isLoading ? 'none' : 'block';
+  searchText.style.display = isLoading ? 'none' : '';
   searchLoading.style.display = isLoading ? 'block' : 'none';
   searchButton.disabled = isLoading;
+  searchButton.setAttribute('aria-busy', String(isLoading));
 }
 
 /**
@@ -670,25 +863,34 @@ function setLoading(isLoading) {
  */
 function preloadPlayer() {
   const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.tabIndex = -1;
   Object.assign(frame.style, {
     width: '0', height: '0', border: 'none',
     position: 'absolute', left: '-9999px', top: '-9999px'
   });
 
-  // 加载完成后一段时间移除，释放资源
-  frame.onload = () => setTimeout(() => frame.remove(), 5000);
+  // 加载完成后一段时间移除，释放资源；即便 load 事件没触发也兜底移除，避免残留一个隐藏 iframe
+  let removed = false;
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    frame.remove();
+  };
+  frame.onload = () => setTimeout(remove, 5000);
+  setTimeout(remove, 30000);
 
   frame.src = './player.html';
   document.body.appendChild(frame);
 }
 
 /**
- * 检查是否是 ID 直接播放格式(c+数字)。ID 会原样交给数据源，不做二次加工。
+ * 检查是否是 ID 直接播放格式(c+数字，大小写不敏感)。ID 会原样交给数据源，不做二次加工。
  * @param {string} query - 用户输入的查询字符串
  * @returns {string|null} - 有效的 ID，否则 null
  */
 function checkDirectPlayId(query) {
-  const match = /^c(\d+)$/.exec(query);
+  const match = /^c(\d+)$/i.exec(query);
   return match ? match[1] : null;
 }
 
@@ -711,58 +913,87 @@ function submitQuery() {
  * 让主题按钮的图标反映当前主题
  */
 function syncThemeIcon() {
+  const dark = themeControl.isDark();
   const icon = themeToggleBtn?.querySelector('.material-symbols-rounded');
-  if (icon) icon.textContent = themeControl.isDark() ? 'light_mode' : 'dark_mode';
+  if (icon) icon.textContent = dark ? 'light_mode' : 'dark_mode';
+  themeToggleBtn?.setAttribute('aria-label', dark ? '切换到浅色主题' : '切换到深色主题');
 }
 
 /**
- * 版本检查和更新提示 - 已迁移至 localStorage
- * 上游 version 为时间戳，直接数值比较即可
+ * 版本检查和更新提示
+ *
+ * 原理：index.html 的 loader 按 update.json 里的 version 拼出 app.js?v=xxx 来加载本文件，
+ * 所以"正常情况下"用户拿到的 app.js 的 APP_VERSION 就等于 update.json 的 version。
+ * 什么时候会不等？
+ *   - 用户把标签页一直开着，期间你发了新版本(这是这个弹窗真正要解决的场景)；
+ *   - loader 拿 update.json 超时、退回了无版本号 URL、命中了旧缓存。
+ * 两种情况下都只需要重新导航一次：新 index.html(no-cache) -> 新 update.json(no-store)
+ * -> 新的 ?v= -> 新 app.js。不需要也不再可能"清缓存"。
+ *
+ * 判定依据是 APP_VERSION(代码里写死的)而非 localStorage：只要用户还在跑旧代码就会一直
+ * 被提醒；一旦真的拿到新代码，APP_VERSION 自然就对上了。不存在"记了已更新但其实没更新"。
  */
-const UPDATE_PENDING_KEY = 'yiclape:updating';
+const UPDATE_DISMISSED_KEY = 'yiclape:update-dismissed';   // sessionStorage，本会话关过的版本
 
 const updateControl = {
-  async clearAllCaches() {
-    try {
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
-      }
-    } catch {}
-    try {
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map(r => r.unregister()));
-      }
-    } catch {}
+  _checking: false,
+
+  /**
+   * 拉取线上版本信息。
+   * @returns {Promise<{version: string, updateTime?: string, changes?: string[]}|null>}
+   */
+  async fetchRemote() {
+    // no-store + 时间戳双保险：即便某层代理无视 Cache-Control 也拿不到旧 json
+    const res = await fetch('./update.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || data.version === undefined || data.version === null) return null;
+    return { ...data, version: String(data.version) };
   },
 
   async checkForUpdate() {
+    if (this._checking) return; // visibilitychange 与定时器可能同时触发
+    this._checking = true;
     try {
-      // 上次点击刷新后 reload 回来，提交版本号
+      const remote = await this.fetchRemote();
+      if (!remote) return;
+
+      // 严格按"不相等"判断而不是"大于"：万一需要回滚到旧版本，用户同样应该被切过去
+      if (remote.version === APP_VERSION) return;
+
+      // 用户本次会话里已经关掉过这个版本的弹窗，切回标签页时就别再弹了
       try {
-        const pending = sessionStorage.getItem(UPDATE_PENDING_KEY);
-        if (pending) {
-          localStorage.setItem(VERSION_KEY, pending);
-          sessionStorage.removeItem(UPDATE_PENDING_KEY);
-          try { cookieStore.remove(LEGACY_VERSION_COOKIE); } catch {}
-          return;
-        }
+        if (sessionStorage.getItem(UPDATE_DISMISSED_KEY) === remote.version) return;
       } catch {}
 
-      let localVersion = '0';
-      try { localVersion = localStorage.getItem(VERSION_KEY) || '0'; } catch {}
-
-      const res = await fetch('./update.json?' + Date.now(), { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data || !data.version) return;
-      if (Number(data.version) > Number(localVersion)) {
-        this.showUpdateModal(data);
-      }
+      this.showUpdateModal(remote);
     } catch (e) {
       console.error('检查更新出错:', e);
+    } finally {
+      this._checking = false;
     }
+  },
+
+  /**
+   * 重新加载页面以获取新版本。
+   * index.html / update.json 都是 no-cache / no-store，普通导航就够了，
+   * 带个一次性参数只是为了绕过极个别无视缓存头的中间代理。
+   */
+  reloadForUpdate() {
+    const url = new URL(location.href);
+    url.searchParams.set('_r', Date.now().toString(36));
+    location.replace(url.toString());
+  },
+
+  /** 把上面加的一次性参数从地址栏去掉 */
+  stripReloadParam() {
+    try {
+      const url = new URL(location.href);
+      if (!url.searchParams.has('_r') && !url.searchParams.has('__v')) return; // __v 是旧版本留下的
+      url.searchParams.delete('_r');
+      url.searchParams.delete('__v');
+      history.replaceState(history.state, '', url.toString());
+    } catch {}
   },
 
   showUpdateModal(data) {
@@ -772,47 +1003,40 @@ const updateControl = {
     const updateList = document.getElementById('updateList');
     const refreshButton = document.getElementById('refreshButton');
     if (!modal || !overlay || !updateTime || !updateList || !refreshButton) return;
+    if (modal.classList.contains('active')) return; // 已经在显示了
 
-    updateTime.textContent = `更新时间: ${data.updateTime}`;
+    updateTime.textContent = data.updateTime ? `更新时间: ${data.updateTime}` : '';
     updateList.innerHTML = '';
-    (data.changes || []).forEach(c => {
+    (Array.isArray(data.changes) ? data.changes : []).forEach(c => {
       const li = document.createElement('li');
-      li.textContent = c;
+      li.textContent = String(c);
       updateList.appendChild(li);
     });
 
-    const newBtn = refreshButton.cloneNode(true);
-    refreshButton.parentNode.replaceChild(newBtn, refreshButton);
-    const btn = document.getElementById('refreshButton');
+    const hide = () => {
+      overlay.classList.remove('active');
+      modal.classList.remove('active');
+    };
 
-    btn.onclick = async () => {
-      btn.disabled = true;
-      btn.textContent = '更新中...';
-      try {
-        try { sessionStorage.setItem(UPDATE_PENDING_KEY, data.version); } catch {}
-        try { cookieStore.remove(LEGACY_VERSION_COOKIE); } catch {}
-        await this.clearAllCaches();
-        // 加时间戳击穿 HTTP 缓存
-        const url = new URL(location.href);
-        url.searchParams.set('__v', Date.now().toString());
-        location.href = url.toString();
-        setTimeout(() => location.reload(), 1000);
-      } catch {
-        btn.disabled = false;
-        btn.textContent = '刷新';
-        try { sessionStorage.removeItem(UPDATE_PENDING_KEY); } catch {}
-      }
+    refreshButton.disabled = false;
+    refreshButton.textContent = '刷新';
+    refreshButton.onclick = () => {
+      refreshButton.disabled = true;
+      refreshButton.textContent = '更新中...';
+      this.reloadForUpdate();
+    };
+
+    overlay.onclick = () => {
+      hide();
+      try { sessionStorage.setItem(UPDATE_DISMISSED_KEY, data.version); } catch {}
     };
 
     overlay.classList.add('active');
     modal.classList.add('active');
-    overlay.onclick = () => {
-      overlay.classList.remove('active');
-      modal.classList.remove('active');
-    };
   },
 
   init() {
+    this.stripReloadParam();
     setTimeout(() => this.checkForUpdate(), 1000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') this.checkForUpdate();
@@ -844,7 +1068,8 @@ function initMainPage() {
   syncThemeIcon();
   preloadPlayer();
 
-  document.getElementById('current-year').textContent = new Date().getFullYear();
+  const yearEl = document.getElementById('current-year');
+  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
   // 初始化容器的淡入淡出状态
   [resultsContainer, noResults, favoritesContainer, placeholder]
@@ -858,14 +1083,13 @@ function initMainPage() {
 
   // 收藏按钮：在收藏列表与之前的界面之间切换
   document.getElementById('favorites-btn')?.addEventListener('click', () => {
-    if (favoritesContainer.style.display === 'block') {
-      containerControl.hideContainer(favoritesContainer, () => {
-        const target = resultsContainer.querySelector('.result-count') ? resultsContainer : placeholder;
-        containerControl.showContainer(target);
-      });
-    } else {
-      displayFavorites();
+    if (favoritesOpen) {
+      closeFavorites();
+      return;
     }
+    viewBeforeFavorites = [resultsContainer, noResults, placeholder]
+      .find(el => containerControl.isVisible(el)) || placeholder;
+    displayFavorites();
   });
 
   // 列表内的按钮统一用事件委托，避免每次渲染重复绑定监听器
@@ -886,10 +1110,11 @@ function initMainPage() {
     }
   });
 
-  // 播放器 iframe 里点爱心增删收藏/切换主题时，若对应界面正开着就跟着刷新
-  // 已迁移至 localStorage，storage 事件可跨 iframe 实时同步
+  // 播放器 iframe 里点爱心增删收藏时，若收藏面板正开着就跟着刷新
+  // (storage 事件只在"其它"文档里触发，所以主页自己的增删不会走到这里，也不需要)
   window.addEventListener('storage', event => {
-    if (event.key === FAVORITES_KEY && favoritesContainer.style.display === 'block') {
+    if (event.storageArea !== localStorage) return;
+    if ((event.key === FAVORITES_KEY || event.key === null) && favoritesOpen) {
       displayFavorites();
     }
   });
@@ -900,14 +1125,21 @@ function initMainPage() {
   });
 
   searchButton.addEventListener('click', submitQuery);
-  searchInput.addEventListener('keypress', e => {
-    if (e.key === 'Enter') submitQuery();
+
+  // keypress 已废弃，改用 keydown；同时忽略中文输入法组词过程中的回车(那是在选字，不是提交)
+  searchInput.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (searchButton.disabled) return; // 搜索进行中，与按钮保持一致
+    e.preventDefault();
+    submitQuery();
   });
 
-  document.getElementById('close-player').addEventListener('click', () => {
-    playerContainer.classList.remove('active');
-    // 延迟清空 iframe，避免音乐继续播放
-    setTimeout(() => { playerFrame.src = ''; }, 300);
+  document.getElementById('close-player')?.addEventListener('click', closePlayer);
+
+  // Esc 关闭播放器
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && playerContainer.classList.contains('active')) closePlayer();
   });
 }
 
@@ -915,13 +1147,18 @@ function initMainPage() {
    4. 播放器
    ========================================================================== */
 
-const WIDE_SCREEN_MIN = 992; // 音量控制器只在宽屏下创建
+// 音量控制器只在宽屏下创建。用 matchMedia 与 player.css 里的 @media (min-width: 992px) 精确对齐
+const WIDE_SCREEN_QUERY = '(min-width: 992px)';
 
 // 播放器 DOM 元素与状态（在 initPlayerPage 中赋值）
 let audioSource, playBtn, playerSeekRange, playerRunningTime, playerDuration;
 // savedVolume: 记住用户设定的音量（非静音值），用于取消静音时恢复、
 // 以及音量控件因跨越宽屏断点被销毁重建后回填，避免被重置为最大值
-let volumeRange = null, volumeBtn = null, muteState = false, savedVolume = 1, playInterval;
+let volumeRange = null, volumeBtn = null, muteState = false, savedVolume = 1;
+// 用户正在拖动进度条时，不让 timeupdate 把滑块拉回去
+let isSeeking = false;
+// 当前歌曲(供收藏按钮读取)。之前挂在 window.currentSong 上，没必要暴露成全局变量
+let currentSong = null;
 
 /**
  * 更新收藏按钮的图标与配色
@@ -935,6 +1172,15 @@ function updateFavoriteButtonUI(isFav) {
   iconElement.textContent = isFav ? 'favorite' : 'favorite_border';
   iconElement.style.color = isFav ? '#ff3e55' : '';
   favoriteBtn.classList.toggle('active', isFav);
+  favoriteBtn.setAttribute('aria-pressed', String(isFav));
+  favoriteBtn.setAttribute('aria-label', isFav ? '取消收藏' : '收藏');
+}
+
+/**
+ * 收起加载层
+ */
+function hidePlayerLoading() {
+  document.getElementById('loadingOverlay')?.classList.add('hidden');
 }
 
 /**
@@ -947,7 +1193,7 @@ function showPlayerError(title, message) {
   const playerArtist = document.querySelector('[data-artist]');
   if (playerTitle) playerTitle.textContent = title;
   if (playerArtist) playerArtist.textContent = message;
-  document.getElementById('loadingOverlay')?.classList.add('hidden');
+  hidePlayerLoading();
 }
 
 /**
@@ -960,19 +1206,19 @@ function loadImageWithFade(imgElement, src, callback) {
   const newImg = new Image();
 
   newImg.onload = () => {
-    imgElement.style.opacity = 0;
+    imgElement.style.opacity = '0';
 
     // 等淡出动画结束后再换源
     setTimeout(() => {
       imgElement.src = src;
-      imgElement.style.opacity = 1;
+      imgElement.style.opacity = '1';
       if (callback) callback();
     }, 300);
   };
 
-  newImg.onerror = error => {
-    console.error('图片加载失败:', error);
-    imgElement.style.opacity = 1;
+  newImg.onerror = () => {
+    console.error('封面加载失败:', src);
+    imgElement.style.opacity = '1';
   };
 
   newImg.src = src;
@@ -982,9 +1228,11 @@ function loadImageWithFade(imgElement, src, callback) {
  * 将秒转换为 m:ss 时间码。
  * 先整体向下取整再拆分分秒：浮点余秒若用 Math.ceil 会进位出 60，
  * 导致播放中显示 "0:60"/"1:60"，且整分钟 "x:00" 被跳过。
+ * NaN / Infinity(时长未知、直播流)一律显示 0:00，Math.max(0, NaN) 会得到 NaN。
  */
 function getTimecode(duration) {
-  const total = Math.max(0, Math.floor(duration));
+  const n = Number(duration);
+  const total = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
@@ -996,7 +1244,10 @@ function getTimecode(duration) {
 function updateRangeFill() {
   document.querySelectorAll('[data-range]').forEach(range => {
     const fill = range.nextElementSibling;
-    if (fill) fill.style.width = `${(range.value / range.max) * 100}%`;
+    if (!fill) return;
+    const max = Number(range.max) || 0;
+    const ratio = max > 0 ? Math.min(1, Math.max(0, Number(range.value) / max)) : 0;
+    fill.style.width = `${ratio * 100}%`;
   });
 }
 
@@ -1005,64 +1256,54 @@ function updateRangeFill() {
  */
 function updateDuration() {
   if (!playerSeekRange || !playerDuration) return;
-  playerSeekRange.max = Math.ceil(audioSource.duration);
-  playerDuration.textContent = getTimecode(Number(playerSeekRange.max));
-}
 
-/**
- * 检查音乐是否播放完毕
- */
-function isMusicEnd() {
-  if (!audioSource.ended) return;
-
-  playBtn?.classList.remove('active');
-  clearInterval(playInterval);
-  if (playerSeekRange) {
-    playerSeekRange.value = 0;
-    if (playerRunningTime) playerRunningTime.textContent = getTimecode(0);
-    updateRangeFill();
+  const duration = audioSource.duration;
+  // 元数据未就绪时是 NaN，直播流是 Infinity；写进 max 会变成 "NaN"/"Infinity" 这种无效值
+  if (!Number.isFinite(duration) || duration <= 0) {
+    playerDuration.textContent = getTimecode(0);
+    return;
   }
+
+  playerSeekRange.max = String(Math.ceil(duration));
+  playerDuration.textContent = getTimecode(duration);
+  updateRangeFill();
 }
 
 /**
- * 更新播放进度
+ * 更新播放进度(由 audio 的 timeupdate 事件驱动，不再用 setInterval 轮询)
  */
 function updateRunningTime() {
-  if (playerSeekRange && playerRunningTime) {
-    playerSeekRange.value = audioSource.currentTime;
-    playerRunningTime.textContent = getTimecode(audioSource.currentTime);
-    updateRangeFill();
-  }
-  isMusicEnd();
+  if (isSeeking || !playerSeekRange || !playerRunningTime) return;
+  playerSeekRange.value = String(audioSource.currentTime);
+  playerRunningTime.textContent = getTimecode(audioSource.currentTime);
+  updateRangeFill();
 }
 
 /**
  * 播放/暂停
  */
 function togglePlay() {
+  if (!audioSource.src || audioSource.error) return; // 没有可播的音频
+
   if (audioSource.paused) {
-    // play() 真正成功后才进入「播放中」UI 状态，
-    // 避免加载失败/被自动播放策略拒绝时按钮误显示为播放中
-    audioSource.play().then(() => {
-      if (audioSource.paused) return; // play() 生效前用户又点了暂停
-      playBtn?.classList.add('active');
-      clearInterval(playInterval); // 防御：避免重复计时器
-      playInterval = setInterval(updateRunningTime, 500);
-    }).catch(error => console.error('Error playing audio:', error));
+    // 按钮状态由 audio 的 play/pause 事件统一驱动，这里只负责发起
+    audioSource.play().catch(error => console.error('播放失败:', error));
   } else {
     audioSource.pause();
-    playBtn?.classList.remove('active');
-    clearInterval(playInterval);
   }
 }
 
 function setVolumeIcon() {
-  volumeBtn.children[0].textContent = audioSource.volume <= 0 ? 'volume_off' : 'volume_up';
+  const icon = volumeBtn?.querySelector('.material-symbols-rounded');
+  if (!icon) return;
+  const muted = audioSource.volume <= 0;
+  icon.textContent = muted ? 'volume_off' : 'volume_up';
+  volumeBtn.setAttribute('aria-label', muted ? '取消静音' : '静音');
 }
 
 function changeVolume() {
   if (!volumeRange || !volumeBtn) return;
-  audioSource.volume = volumeRange.value;
+  audioSource.volume = Number(volumeRange.value);
   muteState = audioSource.volume <= 0;
   if (!muteState) savedVolume = audioSource.volume;
   setVolumeIcon();
@@ -1072,44 +1313,56 @@ function muteVolume() {
   if (!volumeRange || !volumeBtn) return;
 
   muteState = !muteState;
-  audioSource.volume = muteState ? 0 : savedVolume; // 取消静音恢复之前的音量，而非直接跳到最大
-  volumeRange.value = audioSource.volume;
+  // 取消静音恢复之前的音量，而非直接跳到最大；若之前保存的就是 0，则恢复到最大
+  audioSource.volume = muteState ? 0 : (savedVolume > 0 ? savedVolume : 1);
+  volumeRange.value = String(audioSource.volume);
   setVolumeIcon();
   updateRangeFill();
 }
 
 /**
  * 按屏幕宽度创建或销毁音量控制器(宽屏才显示)
+ * @param {boolean} shouldBuild - 是否应该存在音量控制器
  */
-function buildVolumeControl() {
+function buildVolumeControl(shouldBuild) {
   const volumeContainer = document.getElementById('volume-container');
   if (!volumeContainer) return;
 
-  const shouldBuild = window.innerWidth >= WIDE_SCREEN_MIN;
   if (shouldBuild === Boolean(volumeRange)) return; // 没有跨越断点，无需重建
 
   volumeContainer.innerHTML = '';
   volumeRange = null;
   volumeBtn = null;
-  if (!shouldBuild) return;
+
+  if (!shouldBuild) {
+    // 窄屏下没有任何 UI 能取消静音，别让声音悄悄卡在 0；恢复到用户上次的音量
+    if (muteState) {
+      muteState = false;
+      audioSource.volume = savedVolume > 0 ? savedVolume : 1;
+    }
+    return;
+  }
 
   const volume = document.createElement('div');
   volume.className = 'volume';
 
   const button = document.createElement('button');
+  button.type = 'button';
   button.className = 'btn-icon';
-  button.innerHTML = '<span class="material-symbols-rounded">volume_up</span>';
+  button.innerHTML = '<span class="material-symbols-rounded" aria-hidden="true">volume_up</span>';
 
   const wrapper = document.createElement('div');
   wrapper.className = 'range-wrapper';
 
   const slider = document.createElement('input');
   slider.type = 'range';
-  slider.step = '0.05';
+  slider.min = '0';
   slider.max = '1';
+  slider.step = '0.05';
   slider.value = String(muteState ? 0 : savedVolume); // 恢复跨断点前的音量/静音状态（默认最大）
   slider.className = 'range volume-slider';
   slider.dataset.range = '';
+  slider.setAttribute('aria-label', '音量');
 
   const fill = document.createElement('div');
   fill.className = 'range-fill';
@@ -1133,6 +1386,13 @@ function buildVolumeControl() {
 }
 
 /**
+ * 把 URL 放进 CSS url() 时转义引号和反斜杠，避免封面地址里的特殊字符破坏样式
+ */
+function cssUrl(url) {
+  return `url("${String(url).replace(/["\\\n]/g, ch => '\\' + ch)}")`;
+}
+
+/**
  * 更新播放器 UI
  * @param {{id: string, title: string, artist: string, cover: string, audioUrl: string}} track
  */
@@ -1141,24 +1401,42 @@ function updatePlayerUI(track) {
   const playerTitle = document.querySelector('[data-title]');
   const playerArtist = document.querySelector('[data-artist]');
 
-  document.getElementById('loadingOverlay')?.classList.remove('hidden');
+  const title = track.title || '未知歌曲';
+  const artist = track.artist || '未知歌手';
 
-  if (playerTitle) playerTitle.textContent = track.title;
-  if (playerArtist) playerArtist.textContent = track.artist;
-
-  audioSource.src = track.audioUrl;
+  if (playerTitle) playerTitle.textContent = title;
+  if (playerArtist) playerArtist.textContent = artist;
+  document.title = `${title} - ${artist} | YiClapOnline`;
 
   // 供收藏功能读取当前歌曲
-  window.currentSong = { id: track.id, title: track.title, artist: track.artist };
-  updateFavoriteButtonUI(favorites.has(track.id));
+  currentSong = { id: normalizeId(track.id), title, artist };
+  updateFavoriteButtonUI(favorites.has(currentSong.id));
 
   // 数据源没给封面时，沿用 HTML 里的默认封面
   if (playerBanner && track.cover) {
     loadImageWithFade(playerBanner, track.cover, () => {
-      playerBanner.setAttribute('alt', `${track.title} 专辑封面`);
+      playerBanner.setAttribute('alt', `${title} 专辑封面`);
+      // 图片确认能加载再拿去做背景，避免背景先闪一下 broken 图
+      document.body.style.backgroundImage = cssUrl(track.cover);
     });
-    document.body.style.backgroundImage = `url(${track.cover})`;
   }
+
+  // 系统媒体控制(锁屏 / 耳机按键 / 通知栏)显示歌曲信息
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist,
+        artwork: track.cover ? [{ src: track.cover }] : [],
+      });
+    } catch {}
+  }
+
+  audioSource.src = track.audioUrl;
+
+  // 歌曲信息已经拿到就可以收起加载层了。之前等 loadeddata 才收：
+  // iOS Safari 在用户没有交互前根本不会预加载音频，加载层会永远转圈。
+  hidePlayerLoading();
 }
 
 /**
@@ -1173,10 +1451,16 @@ async function loadTrack() {
   }
 
   try {
-    updatePlayerUI(await musicSource.getTrack(songId));
+    const track = await musicSource.getTrack(songId);
+    if (!track || !track.audioUrl) {
+      throw new Error('该歌曲暂时无法播放');
+    }
+    // 数据源忘了回传 id 时用请求的 id 兜底，否则收藏对不上号
+    if (!normalizeId(track.id)) track.id = songId;
+    updatePlayerUI(track);
   } catch (error) {
     console.error('获取歌曲信息失败:', error);
-    showPlayerError('获取歌曲失败', error.message || '请稍后重试');
+    showPlayerError('获取歌曲失败', error?.message || '请稍后重试');
   }
 }
 
@@ -1184,8 +1468,11 @@ async function loadTrack() {
  * 让主题按钮的图标反映当前主题
  */
 function syncPlayerThemeIcon() {
-  const icon = document.querySelector('[data-theme-toggle] .material-symbols-rounded');
-  if (icon) icon.textContent = themeControl.isDark() ? 'light_mode' : 'dark_mode';
+  const dark = themeControl.isDark();
+  const btn = document.querySelector('[data-theme-toggle]');
+  const icon = btn?.querySelector('.material-symbols-rounded');
+  if (icon) icon.textContent = dark ? 'light_mode' : 'dark_mode';
+  btn?.setAttribute('aria-label', dark ? '切换到浅色主题' : '切换到深色主题');
 }
 
 /**
@@ -1193,6 +1480,7 @@ function syncPlayerThemeIcon() {
  */
 function initPlayerPage() {
   audioSource = new Audio();
+  audioSource.preload = 'metadata';
   playBtn = document.querySelector('[data-play-btn]');
   playerSeekRange = document.querySelector('[data-seek]');
   playerRunningTime = document.querySelector('[data-running-time]');
@@ -1206,37 +1494,67 @@ function initPlayerPage() {
     syncPlayerThemeIcon();
   });
 
-  // 音频数据就绪：更新时长并收起加载层
-  audioSource.addEventListener('loadeddata', () => {
-    updateDuration();
-    document.getElementById('loadingOverlay')?.classList.add('hidden');
+  // ---- 播放状态全部由 audio 事件驱动 ----
+  // 这样用系统媒体键 / 锁屏控件 / 耳机按钮暂停时，按钮和进度条也能跟着变。
+  // 之前用 setInterval 轮询 + 在 togglePlay 里手动切 class，外部暂停后 UI 会一直停在"播放中"。
+  const setPlayingUI = playing => {
+    playBtn?.classList.toggle('active', playing);
+    playBtn?.setAttribute('aria-label', playing ? '暂停' : '播放');
+  };
+
+  audioSource.addEventListener('play', () => setPlayingUI(true));
+  audioSource.addEventListener('pause', () => setPlayingUI(false));
+  audioSource.addEventListener('timeupdate', updateRunningTime);
+  audioSource.addEventListener('loadedmetadata', updateDuration);
+  audioSource.addEventListener('durationchange', updateDuration); // 流式 MP3 的时长可能后续才修正
+  audioSource.addEventListener('ended', () => {
+    // loop 开着时不会触发 ended。播完后进度归零，按钮回到"播放"
+    setPlayingUI(false);
+    if (playerSeekRange) playerSeekRange.value = '0';
+    if (playerRunningTime) playerRunningTime.textContent = getTimecode(0);
+    updateRangeFill();
   });
 
-  // 音频加载失败（直链过期、403 防盗链等）：收起加载层并给出提示，
-  // 否则加载层会永远停留在转圈状态
+  // 音频加载失败（直链过期、403 防盗链等）：给出提示
   audioSource.addEventListener('error', () => {
-    clearInterval(playInterval);
-    playBtn?.classList.remove('active');
+    if (!audioSource.src || audioSource.src === location.href) return; // src 为空时的误报
+    setPlayingUI(false);
     const title = document.querySelector('[data-title]')?.textContent || '播放失败';
     showPlayerError(title, '音频加载失败，链接可能已失效');
   });
 
   playBtn?.addEventListener('click', togglePlay);
 
-  // 进度条：更新填充并跳转播放位置
+  // 进度条：拖动过程中只更新显示，松手(change)时才真正跳转，避免拖动时反复触发 seek 与 timeupdate 打架
   playerSeekRange?.addEventListener('input', () => {
+    isSeeking = true;
     updateRangeFill();
-    audioSource.currentTime = playerSeekRange.value;
     if (playerRunningTime) {
       playerRunningTime.textContent = getTimecode(playerSeekRange.value);
+    }
+  });
+  playerSeekRange?.addEventListener('change', () => {
+    isSeeking = false;
+    const target = Number(playerSeekRange.value);
+    if (Number.isFinite(target) && Number.isFinite(audioSource.duration)) {
+      audioSource.currentTime = target;
     }
   });
 
   // 下载按钮
   document.querySelector('[data-download]')?.addEventListener('click', () => {
+    if (!audioSource.src || audioSource.error) return;
+
+    const rawTitle = document.querySelector('[data-title]')?.textContent || 'music';
+    // 去掉文件名里不允许的字符
+    const filename = rawTitle.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'music';
+
     const link = document.createElement('a');
     link.href = audioSource.src;
-    link.download = (document.querySelector('[data-title]')?.textContent || 'music') + '.mp3';
+    link.download = `${filename}.mp3`;
+    // 跨域直链上 download 属性会被浏览器忽略而直接导航；开新标签至少不会把播放器页面替换掉
+    link.target = '_blank';
+    link.rel = 'noopener';
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1247,23 +1565,45 @@ function initPlayerPage() {
   loopBtn?.addEventListener('click', () => {
     audioSource.loop = !audioSource.loop;
     loopBtn.classList.toggle('active', audioSource.loop);
+    loopBtn.setAttribute('aria-pressed', String(audioSource.loop));
   });
 
   // 收藏按钮
   document.querySelector('[data-favorite]')?.addEventListener('click', () => {
-    const song = window.currentSong;
-    if (!song?.id) {
+    if (!currentSong?.id) {
       console.warn('无法收藏：当前没有播放歌曲或歌曲ID不可用');
       return;
     }
 
     // toggle 返回落盘后的真实状态：浏览器拒绝写 localStorage 时按钮不会被点成"已收藏"
-    updateFavoriteButtonUI(favorites.toggle(song));
+    updateFavoriteButtonUI(favorites.toggle(currentSong));
   });
 
-  // 屏幕尺寸变化时按需重建音量控制器
-  window.addEventListener('resize', buildVolumeControl);
-  buildVolumeControl();
+  // 主页在收藏列表里删掉了正在播放的这首歌时，爱心要跟着灭掉
+  window.addEventListener('storage', event => {
+    if (event.storageArea !== localStorage) return;
+    if ((event.key === FAVORITES_KEY || event.key === null) && currentSong?.id) {
+      updateFavoriteButtonUI(favorites.has(currentSong.id));
+    }
+  });
+
+  // 系统媒体键
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('play', () => audioSource.play().catch(() => {}));
+      navigator.mediaSession.setActionHandler('pause', () => audioSource.pause());
+    } catch {}
+  }
+
+  // 屏幕尺寸跨越宽屏断点时按需重建音量控制器
+  const wideScreen = window.matchMedia(WIDE_SCREEN_QUERY);
+  const onBreakpoint = () => buildVolumeControl(wideScreen.matches);
+  if (typeof wideScreen.addEventListener === 'function') {
+    wideScreen.addEventListener('change', onBreakpoint);
+  } else {
+    wideScreen.addListener(onBreakpoint); // 旧 Safari
+  }
+  onBreakpoint();
 
   loadTrack();
 }

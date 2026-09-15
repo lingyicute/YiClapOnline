@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YiClapOnline</title>
   <link rel="shortcut icon" href="./assets/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./style.css">
+  <!-- style.css / app.js 不在这里静态引用，由下方 loader 按 update.json 的版本号带 ?v= 加载 -->
   <!-- 图标 -->
   <style>
     @font-face {
@@ -27,23 +27,122 @@
       word-wrap: normal;
       direction: ltr;
       -webkit-font-feature-settings: 'liga';
+      font-feature-settings: 'liga';
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
+
+    /* 加载遮罩的关键样式内联在此：style.css 是异步加载的，遮罩不能等它 */
+    html { background-color: #f9f9f9; }
+    html.dark-theme { background-color: #121212; }
+    .main-loading-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background-color: #f9f9f9; opacity: 1;
+      transition: opacity 0.5s ease-out;
+    }
+    html.dark-theme .main-loading-overlay { background-color: #121212; }
+    .main-loading-overlay img { width: 60px; }
+    .main-loading-overlay .boot-error { font: 15px/1.6 sans-serif; color: #c62828; text-align: center; padding: 0 24px; }
   </style>
+
+  <!--
+    资源加载器(与 player.html 中的一份保持一致)
+
+    为什么不直接写 <script src="app.js">：
+      Cloudflare Pages 给 .js/.css 的默认缓存是 max-age=43200(12 小时)，
+      用户在这期间即使刷新也拿不到新代码。把版本号拼进 URL(app.js?v=xxx)，
+      URL 一变浏览器就必定重新下载——这是静态站点里唯一可靠的"强制更新"手段。
+    版本号从 update.json 读(它被 _headers 设为 no-store，永远是最新的)。
+    拿不到 update.json(离线 / 超时)时退回无版本号 URL，让浏览器缓存兜底，页面依然可用。
+  -->
+  <script>
+    (function () {
+      'use strict';
+      var FETCH_TIMEOUT = 6000;   // update.json 超过这个时间没回来就先用缓存启动
+      var start = Date.now();
+
+      // 主题类尽早挂上，深色用户不至于先看到白屏(app.js 加载后会再校准一次)
+      try {
+        document.documentElement.classList.add(localStorage.getItem('yiclape:darkmode') === '1' ? 'dark-theme' : 'light-theme');
+      } catch (e) {}
+
+      var booted = false;
+      var pending = 2; // style.css + app.js
+
+      function resourceSettled() {
+        if (--pending > 0) return;
+        // 两个资源都到了(成功或失败)，且 DOM 已就绪，再收起遮罩；至少停留 300ms 避免闪一下
+        var finish = function () {
+          var wait = Math.max(0, 300 - (Date.now() - start));
+          setTimeout(hideOverlay, wait);
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', finish);
+        else finish();
+      }
+
+      var hidden = false;
+      function hideOverlay() {
+        if (hidden) return;
+        hidden = true;
+        var overlay = document.getElementById('main-loading-overlay');
+        if (!overlay) return;
+        overlay.style.opacity = '0';
+        overlay.addEventListener('transitionend', function () { overlay.remove(); }, { once: true });
+        setTimeout(function () { overlay.remove(); }, 600);
+      }
+
+      function showBootError() {
+        var overlay = document.getElementById('main-loading-overlay');
+        if (!overlay) return;
+        hidden = true; // 别再把它淡出了
+        overlay.innerHTML = '<p class="boot-error">页面脚本加载失败，请检查网络后刷新重试。</p>';
+      }
+
+      function boot(version) {
+        if (booted) return;
+        booted = true;
+        var q = version ? '?v=' + encodeURIComponent(version) : '';
+
+        var css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = './style.css' + q;
+        css.onload = css.onerror = resourceSettled;
+        document.head.appendChild(css);
+
+        var js = document.createElement('script');
+        js.src = './app.js' + q;
+        js.onload = resourceSettled;
+        js.onerror = function () { resourceSettled(); showBootError(); };
+        document.head.appendChild(js);
+      }
+
+      var timer = setTimeout(function () { boot(null); }, FETCH_TIMEOUT);
+      try {
+        fetch('./update.json?_=' + Date.now(), { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function (j) { clearTimeout(timer); boot(j && j.version ? String(j.version) : null); })
+          .catch(function () { clearTimeout(timer); boot(null); });
+      } catch (e) {
+        clearTimeout(timer);
+        boot(null);
+      }
+    })();
+  </script>
 </head>
 <body data-page="main">
   <!-- 右上角按钮 -->
-  <button id="favorites-btn" class="top-btn">
-    <span class="material-symbols-rounded">favorite_border</span>
+  <button id="favorites-btn" class="top-btn" type="button" aria-label="我的收藏" title="我的收藏">
+    <span class="material-symbols-rounded" aria-hidden="true">favorite_border</span>
   </button>
 
-  <button id="new-theme-toggle" class="top-btn">
-    <span class="material-symbols-rounded">dark_mode</span>
+  <button id="new-theme-toggle" class="top-btn" type="button" aria-label="切换主题" title="切换主题">
+    <span class="material-symbols-rounded" aria-hidden="true">dark_mode</span>
   </button>
 
   <!-- 主页加载覆盖层 -->
-  <div id="main-loading-overlay" class="main-loading-overlay">
-    <img src="./assets/loading.svg" alt="加载中...">
+  <div id="main-loading-overlay" class="main-loading-overlay" aria-hidden="true">
+    <img src="./assets/loading.svg" alt="">
   </div>
 
   <div class="container">
@@ -55,11 +154,12 @@
 
       <div class="search-container">
         <div class="search-box">
-          <input type="text" id="search-input" placeholder="输入歌曲名称、歌手或 Clap ID..." autofocus>
+          <input type="text" id="search-input" placeholder="输入歌曲名称、歌手或 Clap ID..."
+                 aria-label="搜索歌曲" autocomplete="off" autofocus>
           <button id="search-button" type="button">
             <span class="search-text">搜索</span>
-            <span class="search-loading" style="display: none;">
-              <svg class="spinner" viewBox="0 0 24 24">
+            <span class="search-loading" style="display: none;" aria-hidden="true">
+              <svg class="spinner" viewBox="0 0 24 24" focusable="false">
                 <circle class="path" cx="12" cy="12" r="10" fill="none" stroke-width="3"></circle>
               </svg>
             </span>
@@ -92,7 +192,7 @@
         </div>
       </div>
 
-      <div id="no-results" class="no-results" style="display: none;">
+      <div id="no-results" class="no-results" style="display: none;" role="status" aria-live="polite">
         <p>未找到相关歌曲，请尝试其他关键词。</p>
       </div>
 
@@ -104,52 +204,24 @@
     </footer>
 
     <div id="player-container" class="player-container">
-      <iframe id="player-frame" src=""></iframe>
-      <button id="close-player" class="close-player">
-        <span class="material-symbols-rounded">close</span>
+      <!-- src 留空会让 iframe 加载 about:blank；不要写 src=""，部分浏览器会把它解析成当前页面地址并重复加载主页 -->
+      <iframe id="player-frame" title="播放器" src="about:blank" allow="autoplay"></iframe>
+      <button id="close-player" class="close-player" type="button" aria-label="关闭播放器" title="关闭播放器">
+        <span class="material-symbols-rounded" aria-hidden="true">close</span>
       </button>
     </div>
   </div>
 
-  <!-- 加载覆盖层处理脚本 -->
-  <script>
-    (function () {
-      // 淡出并移除覆盖层(至少显示 300ms)
-      function hideOverlay() {
-        setTimeout(function () {
-          const overlay = document.getElementById('main-loading-overlay');
-          if (!overlay) return;
-
-          overlay.style.opacity = '0';
-          setTimeout(() => overlay.remove(), 500);
-        }, 300);
-      }
-
-      // 最长等待 3 秒，超时后强制隐藏覆盖层
-      const loadingTimeout = setTimeout(function () {
-        console.warn('加载超时，强制隐藏覆盖层');
-        hideOverlay();
-      }, 3000);
-
-      window.addEventListener('load', function () {
-        clearTimeout(loadingTimeout);
-        hideOverlay();
-      });
-    })();
-  </script>
-
-  <script src="./app.js"></script>
-
   <!-- 更新提示弹窗 -->
   <div class="update-modal-overlay" id="updateOverlay"></div>
-  <div class="update-modal" id="updateModal">
-    <div class="update-modal-title">发现新版本</div>
+  <div class="update-modal" id="updateModal" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle">
+    <div class="update-modal-title" id="updateModalTitle">发现新版本</div>
     <div class="update-modal-time" id="updateTime"></div>
     <div class="update-modal-content">
       <ul id="updateList"></ul>
     </div>
     <div class="update-modal-button">
-      <button id="refreshButton">刷新</button>
+      <button id="refreshButton" type="button">刷新</button>
     </div>
   </div>
 </body>

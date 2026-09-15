@@ -53,7 +53,6 @@ body {
   color: var(--text-color);
   line-height: 1.6;
   min-height: 100vh;
-  padding: 0;
   overflow-x: hidden;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
@@ -116,8 +115,13 @@ header {
 }
 
 .top-btn:hover {
-  background-color: #4285F4;
+  background-color: var(--primary-color);
   color: #fff;
+}
+
+.top-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 :root.dark-theme .top-btn {
@@ -190,8 +194,13 @@ header {
   letter-spacing: 1px;
 }
 
-.search-box button:hover {
+.search-box button:hover:not(:disabled) {
   background-color: var(--primary-hover);
+}
+
+.search-box button:disabled {
+  cursor: default;
+  opacity: 0.85;
 }
 
 /* 搜索按钮内的加载动画 */
@@ -285,6 +294,11 @@ main {
   border-bottom: none;
 }
 
+#favorites-container .results-header,
+#favorites-container .result-item {
+  grid-template-columns: 2fr 1fr 100px;
+}
+
 .result-item:hover {
   background-color: rgba(66, 133, 244, 0.05);
 }
@@ -300,6 +314,8 @@ main {
   text-overflow: ellipsis;
   padding-right: 10px;
   color: var(--text-color);
+  min-width: 0; /* grid 子项默认 min-width:auto，长标题会撑破列宽而不是显示省略号 */
+  align-self: center;
 }
 
 .result-artist {
@@ -308,6 +324,9 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   transition: color var(--transition-normal);
+  min-width: 0;
+  padding-right: 10px;
+  align-self: center;
 }
 
 :root.dark-theme .result-artist {
@@ -333,9 +352,16 @@ main {
   transition: background-color var(--transition-normal), transform var(--transition-normal);
 }
 
-.play-button:hover {
+.play-button:hover,
+.play-button:focus-visible {
   background-color: var(--primary-color);
   transform: scale(1.1);
+}
+
+.play-button:focus-visible,
+.remove-button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
 
 :root.dark-theme .play-button {
@@ -348,7 +374,8 @@ main {
   transition: color var(--transition-normal);
 }
 
-.play-button:hover .material-symbols-rounded {
+.play-button:hover .material-symbols-rounded,
+.play-button:focus-visible .material-symbols-rounded {
   color: white;
 }
 
@@ -384,6 +411,10 @@ main {
   border-top: 1px solid var(--border-color);
 }
 
+:root.dark-theme .result-count {
+  color: #aaa;
+}
+
 /* 页脚 */
 .footer {
   margin-top: auto;
@@ -408,18 +439,17 @@ main {
   right: -100%;
   width: 100%;
   height: 100%;
-  background-color: rgba(18, 18, 18, 1);
+  background-color: var(--background-color);
   z-index: 1000;
-  transition: right 0.3s ease;
+  transition: right 0.3s ease, visibility 0s linear 0.3s;
   overflow: hidden;
-}
-
-:root.light-theme .player-container {
-  background-color: rgba(249, 249, 249, 1);
+  visibility: hidden; /* 收起时不可聚焦、不被读屏器读到；transition 让它在滑出动画结束后再隐藏 */
 }
 
 .player-container.active {
   right: 0;
+  visibility: visible;
+  transition: right 0.3s ease, visibility 0s;
 }
 
 .player-container iframe {
@@ -446,8 +476,14 @@ main {
   transition: background-color var(--transition-normal);
 }
 
-.close-player:hover {
+.close-player:hover,
+.close-player:focus-visible {
   background-color: rgba(0, 0, 0, 0.7);
+}
+
+.close-player:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* 响应式设计 */
@@ -489,12 +525,6 @@ main {
     grid-template-columns: 2fr 1.5fr 100px;
   }
   
-  /* 确保删除和播放按钮有足够的空间 */
-  #favorites-container .result-action {
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  
   .play-button {
     width: 32px;
     height: 32px;
@@ -520,11 +550,10 @@ main {
     padding: 10px 12px;
   }
   
-  /* 操作按钮在特小屏幕上的样式 */
   #favorites-container .result-action {
     gap: 6px;
   }
-  
+
   #favorites-container .play-button,
   #favorites-container .remove-button {
     min-width: 30px;
@@ -559,12 +588,21 @@ main {
   justify-content: center;
   width: 30px;
   height: 30px;
+  flex-shrink: 0;
   border-radius: 50%;
   background-color: rgba(255, 62, 85, 0.1);
   border: none;
-  margin-left: 10px;
   cursor: pointer;
   transition: all 0.3s ease;
+}
+
+/* 播放/删除按钮之间的间距统一用 gap，不再靠 margin-left(移动端会把按钮挤出列宽) */
+.result-action {
+  gap: 8px;
+}
+
+.play-button {
+  flex-shrink: 0;
 }
 
 .remove-button:hover {
@@ -669,8 +707,13 @@ main {
   transition: background-color 0.3s ease;
 }
 
-.update-modal-button button:hover {
+.update-modal-button button:hover:not(:disabled) {
   background-color: var(--primary-hover);
+}
+
+.update-modal-button button:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 .update-modal-overlay {
