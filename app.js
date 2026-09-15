@@ -288,7 +288,10 @@ function reveal(container) {
  * @param {string} message - 提示文本
  */
 function showNotice(message) {
-  noResults.textContent = message;
+  // 只替换 <p> 的文本、保留节点结构；
+  // 若直接对容器用 textContent 会销毁 <p>，.no-results p 的样式将永不生效
+  const p = noResults.querySelector('p') || noResults.appendChild(document.createElement('p'));
+  p.textContent = message;
   containerControl.showContainer(noResults);
 }
 
@@ -364,12 +367,15 @@ async function performSearch(query) {
  * @param {Array} results - 搜索结果数组
  */
 function displaySearchResults(results) {
-  containerControl.hideAllContainers(resultsContainer, () => {
-    if (results.length === 0) {
-      showNotice('未找到相关歌曲，请尝试其他关键词。');
-      return;
-    }
+  // 空结果时不能把 resultsContainer 当作 hideAllContainers 的例外容器，
+  // 否则上一次的搜索结果会残留在页面上、与提示同时显示。
+  // 复用 displayError：先隐藏全部容器（含旧结果列表），再显示提示。
+  if (results.length === 0) {
+    displayError('未找到相关歌曲，请尝试其他关键词。');
+    return;
+  }
 
+  containerControl.hideAllContainers(resultsContainer, () => {
     resultsList.innerHTML = '';
     results.forEach(result => resultsList.appendChild(buildSongRow(result)));
     setCount(resultsContainer, `找到 ${results.length} 个结果`);
@@ -671,7 +677,9 @@ const WIDE_SCREEN_MIN = 992; // 音量控制器只在宽屏下创建
 
 // 播放器 DOM 元素与状态（在 initPlayerPage 中赋值）
 let audioSource, playBtn, playerSeekRange, playerRunningTime, playerDuration;
-let volumeRange = null, volumeBtn = null, muteState = false, playInterval;
+// savedVolume: 记住用户设定的音量（非静音值），用于取消静音时恢复、
+// 以及音量控件因跨越宽屏断点被销毁重建后回填，避免被重置为最大值
+let volumeRange = null, volumeBtn = null, muteState = false, savedVolume = 1, playInterval;
 
 /**
  * 更新收藏按钮的图标与配色
@@ -729,11 +737,14 @@ function loadImageWithFade(imgElement, src, callback) {
 }
 
 /**
- * 将秒转换为 m:ss 时间码
+ * 将秒转换为 m:ss 时间码。
+ * 先整体向下取整再拆分分秒：浮点余秒若用 Math.ceil 会进位出 60，
+ * 导致播放中显示 "0:60"/"1:60"，且整分钟 "x:00" 被跳过。
  */
 function getTimecode(duration) {
-  const minutes = Math.floor(duration / 60);
-  const seconds = Math.ceil(duration - minutes * 60);
+  const total = Math.max(0, Math.floor(duration));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
   return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
 }
 
@@ -788,9 +799,14 @@ function updateRunningTime() {
  */
 function togglePlay() {
   if (audioSource.paused) {
-    audioSource.play().catch(error => console.error('Error playing audio:', error));
-    playBtn?.classList.add('active');
-    playInterval = setInterval(updateRunningTime, 500);
+    // play() 真正成功后才进入「播放中」UI 状态，
+    // 避免加载失败/被自动播放策略拒绝时按钮误显示为播放中
+    audioSource.play().then(() => {
+      if (audioSource.paused) return; // play() 生效前用户又点了暂停
+      playBtn?.classList.add('active');
+      clearInterval(playInterval); // 防御：避免重复计时器
+      playInterval = setInterval(updateRunningTime, 500);
+    }).catch(error => console.error('Error playing audio:', error));
   } else {
     audioSource.pause();
     playBtn?.classList.remove('active');
@@ -806,6 +822,7 @@ function changeVolume() {
   if (!volumeRange || !volumeBtn) return;
   audioSource.volume = volumeRange.value;
   muteState = audioSource.volume <= 0;
+  if (!muteState) savedVolume = audioSource.volume;
   setVolumeIcon();
 }
 
@@ -813,7 +830,7 @@ function muteVolume() {
   if (!volumeRange || !volumeBtn) return;
 
   muteState = !muteState;
-  audioSource.volume = muteState ? 0 : 1;
+  audioSource.volume = muteState ? 0 : savedVolume; // 取消静音恢复之前的音量，而非直接跳到最大
   volumeRange.value = audioSource.volume;
   setVolumeIcon();
   updateRangeFill();
@@ -848,7 +865,7 @@ function buildVolumeControl() {
   slider.type = 'range';
   slider.step = '0.05';
   slider.max = '1';
-  slider.value = '1'; // 默认音量最大
+  slider.value = String(muteState ? 0 : savedVolume); // 恢复跨断点前的音量/静音状态（默认最大）
   slider.className = 'range volume-slider';
   slider.dataset.range = '';
 
@@ -862,6 +879,7 @@ function buildVolumeControl() {
   volumeRange = slider;
   volumeBtn = button;
   audioSource.volume = Number(slider.value);
+  setVolumeIcon(); // 让图标与恢复后的音量一致（如静音状态下显示 volume_off）
 
   slider.addEventListener('input', () => {
     changeVolume();
@@ -950,6 +968,15 @@ function initPlayerPage() {
   audioSource.addEventListener('loadeddata', () => {
     updateDuration();
     document.getElementById('loadingOverlay')?.classList.add('hidden');
+  });
+
+  // 音频加载失败（直链过期、403 防盗链等）：收起加载层并给出提示，
+  // 否则加载层会永远停留在转圈状态
+  audioSource.addEventListener('error', () => {
+    clearInterval(playInterval);
+    playBtn?.classList.remove('active');
+    const title = document.querySelector('[data-title]')?.textContent || '播放失败';
+    showPlayerError(title, '音频加载失败，链接可能已失效');
   });
 
   playBtn?.addEventListener('click', togglePlay);
