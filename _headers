@@ -1,0 +1,36 @@
+# Cloudflare Pages 自定义响应头
+# 文档: https://developers.cloudflare.com/pages/configuration/headers/
+#
+# 缓存策略(配合 index.html / player.html 里的 loader):
+#   - update.json      永远不缓存。它是版本号的唯一真相来源，loader 和更新检测都靠它。
+#   - HTML             每次都回源验证(有 ETag，未变时 304，成本很低)。
+#   - js / css         loader 总是带 ?v=版本号 加载；版本一变 URL 就变，所以可以放心长缓存。
+#                      Cloudflare Pages 的默认值是 max-age=43200，这里显式写出来并放宽。
+#   - assets/*         字体/图片几乎不变，长缓存。
+
+/update.json
+  Cache-Control: no-store
+
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/player
+  Cache-Control: no-cache
+
+/player.html
+  Cache-Control: no-cache
+
+/app.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/style.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/player.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=2592000
