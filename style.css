@@ -353,8 +353,8 @@ main {
   padding: 3px 6px;
   border-radius: 4px;
   color: #fff;
-  background: linear-gradient(135deg, #4ea4ff, #1e83f7);
-  box-shadow: 0 1px 3px rgba(11, 104, 255, 0.4);
+  background: #1e83f7; 
+  box-shadow: none; 
   user-select: none;
 }
 
