@@ -223,73 +223,108 @@ themeControl.applyTheme();
 
 const musicSource = {
   /** 数据源名称，仅用于日志与错误提示(可随时改，不影响已存的收藏) */
-  name: '未配置',
+  name: 'sxq1',
 
   /**
    * 数据源稳定标识，写进收藏数据里用于"换源即作废"。
    * 换数据源时改这个值，老收藏即被整体丢弃；
    * 留空则退化成用 name。
    */
-  id: '',
+  id: 'sxq1',
+
+  /** 数据源后端基地址 */
+  _baseUrl: 'https://nextmusic.toubiec.cn/api',
+
+  /**
+   * 在 112.114.x.x ~ 112.117.x.x 之间随机生成一个 ip，供接口反爬校验使用
+   */
+  _randomIp() {
+    const second = 114 + Math.floor(Math.random() * 4); // 114..117
+    const third = Math.floor(Math.random() * 256);
+    const fourth = Math.floor(Math.random() * 256);
+    return `112.${second}.${third}.${fourth}`;
+  },
+
+  /**
+   * 统一封装对数据源后端的 POST 请求：自动加随机 ip、处理网络/HTTP/业务码错误。
+   * @returns {Promise<any>} 接口返回的 data 字段
+   */
+  async _request(path, body) {
+    let res;
+    try {
+      res = await fetch(`${this._baseUrl}/${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': this._ua,
+        },
+        body: JSON.stringify({ ...body, ip: this._randomIp() }),
+      });
+    } catch (error) {
+      throw new Error('网络请求失败，请检查网络连接后重试');
+    }
+    if (!res.ok) throw new Error(`请求失败：HTTP ${res.status}`);
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error('接口返回的数据无法解析，请稍后重试');
+    }
+    if (!data || data.code !== 200) {
+      throw new Error(data?.message ? `获取失败：${data.message}` : '接口返回异常，请稍后重试');
+    }
+    return data.data;
+  },
 
   /**
    * 按关键词搜索歌曲。
    *
    * @param {string} keyword - 用户输入的关键词（已 trim，保证非空）
-   * @returns {Promise<Array<{id: string, title: string, artist: string}>>}
+   * @returns {Promise<Array<{id: string, title: string, artist: string, vip: boolean, cover: string}>>}
    *          按相关度排序的结果列表；无结果时返回 []
    * @throws {Error} 网络失败、状态码异常或响应结构不符
-   *
-   * @example
-   * async search(keyword) {
-   *   const url = `https://api.example.com/search?q=${encodeURIComponent(keyword)}`;
-   *   const res = await fetch(url);
-   *   if (!res.ok) throw new Error(`搜索失败：HTTP ${res.status}`);
-   *
-   *   const data = await res.json();
-   *   return data.items.map(item => ({
-   *     id: String(item.songId),
-   *     title: item.name,
-   *     artist: item.singer
-   *   }));
-   * }
    */
   async search(keyword) {
-    throw new Error(`musicSource.search() 尚未实现（当前数据源：${this.name}）`);
+    const data = await this._request('search', {
+      keyword,
+      type: 1,
+      limit: 100,
+      offset: 0,
+    });
+    // 后端偶发返回结构异常时按空结果处理，避免上层直接报 TypeError
+    if (!data || !Array.isArray(data.songs)) return [];
+    return data.songs.map(song => ({
+      id: String(song.id),
+      title: song.name || '未知歌曲',
+      artist: song.singer || '未知歌手',
+      cover: song.picimg || '',
+      vip: song.free === false,
+    }));
   },
 
   /**
-   * 按 ID 取单曲信息与可直接播放的音频地址。
+   * 按 ID 换取可直接播放的音频直链。
+   *
+   * 注意：后端 getSongUrl 只返回音频直链，不返回标题/歌手/封面等元数据，
+   * 这些字段由播放页从搜索结果带入的 URL 参数补齐（见 loadTrack）。
    *
    * @param {string} id - search() 返回的 id
-   * @returns {Promise<{
-   *   id: string,        // 原样回传，用于收藏状态比对
-   *   title: string,
-   *   artist: string,
-   *   cover: string,     // 封面图 URL；留空则播放器沿用内置默认封面
-   *   audioUrl: string   // 音频直链，直接交给 <audio> 播放
-   * }>}
+   * @returns {Promise<{id: string, title: string, artist: string, cover: string, audioUrl: string}>}
    * @throws {Error} 歌曲不存在、无版权、或音频地址换取失败
-   *
-   * @example
-   * async getTrack(id) {
-   *   const res = await fetch(`https://api.example.com/song/${encodeURIComponent(id)}`);
-   *   if (!res.ok) throw new Error(`获取歌曲失败：HTTP ${res.status}`);
-   *
-   *   const data = await res.json();
-   *   if (!data.playUrl) throw new Error('该歌曲暂时无法播放');
-   *
-   *   return {
-   *     id,
-   *     title: data.name,
-   *     artist: data.singer,
-   *     cover: data.cover ?? '',
-   *     audioUrl: data.playUrl
-   *   };
-   * }
    */
   async getTrack(id) {
-    throw new Error(`musicSource.getTrack() 尚未实现（当前数据源：${this.name}）`);
+    const data = await this._request('getSongUrl', {
+      id,
+      level: 'standard',
+    });
+    if (!data || !data.url) throw new Error('该歌曲暂时无法播放');
+    return {
+      id,
+      title: '',
+      artist: '',
+      cover: '',
+      audioUrl: data.url,
+    };
   }
 };
 
@@ -337,6 +372,8 @@ const favorites = {
           id,
           title: typeof item.title === 'string' ? item.title : '',
           artist: typeof item.artist === 'string' ? item.artist : '',
+          vip: item.vip === true,
+          cover: typeof item.cover === 'string' ? item.cover : '',
         });
       }
       return items;
@@ -370,7 +407,7 @@ const favorites = {
     return !!id && this.read().some(item => item.id === id);
   },
 
-  add({ id, title, artist } = {}) {
+  add({ id, title, artist, vip, cover } = {}) {
     id = normalizeId(id);
     if (!id) return false;
 
@@ -381,6 +418,9 @@ const favorites = {
       id,
       title: typeof title === 'string' ? title : '',
       artist: typeof artist === 'string' ? artist : '',
+      // vip / cover 仅用于展示与传给播放页；旧收藏没有这两个字段时退化成 false / ''
+      vip: vip === true,
+      cover: typeof cover === 'string' ? cover : '',
     });
     return this.write(items);
   },
@@ -400,14 +440,14 @@ const favorites = {
    * 收藏/取消收藏一次搞定。
    * @returns {boolean} 操作完成后这首歌的真实收藏状态(以存储为准，写失败会退回原状)
    */
-  toggle({ id, title, artist } = {}) {
+  toggle({ id, title, artist, vip, cover } = {}) {
     id = normalizeId(id);
     if (!id) return false;
 
     if (this.has(id)) {
       this.remove(id);
     } else {
-      this.add({ id, title, artist });
+      this.add({ id, title, artist, vip, cover });
     }
     return this.has(id);
   },
@@ -611,14 +651,25 @@ function iconButton(className, icon, label, dataset) {
  * @param {boolean} [removable] - 是否显示删除按钮(仅收藏列表需要)
  * @returns {HTMLDivElement}
  */
-function buildSongRow({ id, title, artist }, removable) {
+function buildSongRow({ id, title, artist, vip, cover }, removable) {
   const row = document.createElement('div');
   row.className = 'result-item';
 
   const titleEl = document.createElement('div');
   titleEl.className = 'result-title';
-  titleEl.textContent = title || '未知歌曲';
-  titleEl.title = title || '';
+  const titleText = document.createElement('span');
+  titleText.className = 'title-text';
+  titleText.textContent = title || '未知歌曲';
+  titleText.title = title || '';
+  titleEl.appendChild(titleText);
+  // VIP 歌曲：在标题旁打上标记
+  if (vip) {
+    const badge = document.createElement('span');
+    badge.className = 'vip-badge';
+    badge.textContent = 'VIP';
+    badge.title = 'VIP 歌曲';
+    titleEl.appendChild(badge);
+  }
 
   const artistEl = document.createElement('div');
   artistEl.className = 'result-artist';
@@ -627,7 +678,13 @@ function buildSongRow({ id, title, artist }, removable) {
 
   const actionEl = document.createElement('div');
   actionEl.className = 'result-action';
-  actionEl.appendChild(iconButton('play-button', 'play_arrow', '播放', { songId: id }));
+  actionEl.appendChild(iconButton('play-button', 'play_arrow', '播放', {
+    songId: id,
+    vip: vip ? '1' : '',
+    title: title || '',
+    artist: artist || '',
+    cover: cover || '',
+  }));
   if (removable) {
     actionEl.appendChild(iconButton('remove-button', 'delete', '取消收藏', { songId: id }));
   }
@@ -685,6 +742,8 @@ function displaySearchResults(results) {
       id: normalizeId(result.id),
       title: result.title,
       artist: result.artist,
+      vip: result.vip,
+      cover: result.cover,
     })));
     resultsList.appendChild(fragment);
     setCount(resultsContainer, `找到 ${list.length} 个结果`);
@@ -751,7 +810,7 @@ function closeFavorites() {
  * 打开播放器播放指定歌曲
  * @param {string} id - 数据源歌曲 ID
  */
-function playTrack(id) {
+function playTrack(id, meta) {
   id = normalizeId(id);
   if (!id) return;
 
@@ -761,7 +820,18 @@ function playTrack(id) {
     closePlayerTimer = null;
   }
 
-  playerFrame.src = `./player.html?id=${encodeURIComponent(id)}`;
+  // getSongUrl 只返回音频直链、不返回标题/歌手/封面/是否 VIP，
+  // 所以把搜索结果里拿到的这些元数据通过 URL 带给播放页（见 loadTrack 补齐）
+  const params = new URLSearchParams();
+  params.set('id', id);
+  if (meta) {
+    if (meta.title) params.set('title', meta.title);
+    if (meta.artist) params.set('artist', meta.artist);
+    if (meta.cover) params.set('cover', meta.cover);
+    if (meta.vip) params.set('vip', '1');
+  }
+
+  playerFrame.src = `./player.html?${params.toString()}`;
   // 收起/展开时的可访问性由 CSS 的 visibility 负责(隐藏时自动移出 Tab 顺序与无障碍树)
   playerContainer.classList.add('active');
 }
@@ -1155,8 +1225,14 @@ function initMainPage() {
 
   // 列表内的按钮统一用事件委托，避免每次渲染重复绑定监听器
   resultsList.addEventListener('click', e => {
-    const id = e.target.closest('.play-button')?.dataset.songId;
-    if (id) playTrack(id);
+    const button = e.target.closest('.play-button');
+    if (!button) return;
+    playTrack(button.dataset.songId, {
+      vip: button.dataset.vip === '1',
+      title: button.dataset.title,
+      artist: button.dataset.artist,
+      cover: button.dataset.cover,
+    });
   });
 
   favoritesList.addEventListener('click', e => {
@@ -1167,7 +1243,12 @@ function initMainPage() {
     if (button.classList.contains('remove-button')) {
       removeFavoriteRow(id);
     } else {
-      playTrack(id);
+      playTrack(id, {
+        vip: button.dataset.vip === '1',
+        title: button.dataset.title,
+        artist: button.dataset.artist,
+        cover: button.dataset.cover,
+      });
     }
   });
 
@@ -1469,9 +1550,19 @@ function updatePlayerUI(track) {
   if (playerArtist) playerArtist.textContent = artist;
   document.title = `${title} - ${artist} | YiClapOnline`;
 
-  // 供收藏功能读取当前歌曲
-  currentSong = { id: normalizeId(track.id), title, artist };
+  // 供收藏功能读取当前歌曲（连同 vip / cover 一并记下，收藏后从收藏列表播放也能带上）
+  currentSong = {
+    id: normalizeId(track.id),
+    title,
+    artist,
+    vip: track.vip === true,
+    cover: track.cover || '',
+  };
   updateFavoriteButtonUI(favorites.has(currentSong.id));
+
+  // VIP 歌曲：在播放器合适位置展示"独家解析"提示
+  const vipBanner = document.querySelector('[data-vip-banner]');
+  if (vipBanner) vipBanner.hidden = !(track.vip === true);
 
   // 数据源没给封面时，沿用 HTML 里的默认封面
   if (playerBanner && track.cover) {
@@ -1504,12 +1595,21 @@ function updatePlayerUI(track) {
  * 从 id 查询参数读取歌曲 ID，交给数据源换取播放信息
  */
 async function loadTrack() {
-  const songId = new URLSearchParams(window.location.search).get('id');
+  const params = new URLSearchParams(window.location.search);
+  const songId = params.get('id');
 
   if (!songId) {
     showPlayerError('未提供歌曲 ID', '请从主页选择要播放的歌曲');
     return;
   }
+
+  // getSongUrl 不返回元数据，主页在打开播放器时已把标题/歌手/封面/是否 VIP 通过 URL 带过来
+  const meta = {
+    title: params.get('title') || '',
+    artist: params.get('artist') || '',
+    cover: params.get('cover') || '',
+    vip: params.get('vip') === '1',
+  };
 
   try {
     const track = await musicSource.getTrack(songId);
@@ -1518,6 +1618,11 @@ async function loadTrack() {
     }
     // 数据源忘了回传 id 时用请求的 id 兜底，否则收藏对不上号
     if (!normalizeId(track.id)) track.id = songId;
+    // 用主页传来的元数据补齐（getSongUrl 只给出音频直链）
+    track.title = track.title || meta.title;
+    track.artist = track.artist || meta.artist;
+    track.cover = track.cover || meta.cover;
+    track.vip = track.vip || meta.vip;
     updatePlayerUI(track);
   } catch (error) {
     console.error('获取歌曲信息失败:', error);

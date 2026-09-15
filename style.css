@@ -310,13 +310,20 @@ main {
 
 .result-title {
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   padding-right: 10px;
   color: var(--text-color);
   min-width: 0; /* grid 子项默认 min-width:auto，长标题会撑破列宽而不是显示省略号 */
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.result-title .title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .result-artist {
@@ -332,6 +339,23 @@ main {
 
 :root.dark-theme .result-artist {
   color: #aaa;
+}
+
+/* VIP 歌曲标记：与播放器内的"独家解析"提示同色系，保持风格一致 */
+.vip-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: #fff;
+  background: linear-gradient(135deg, #ffd34e, #f7971e);
+  box-shadow: 0 1px 3px rgba(247, 151, 30, 0.4);
+  user-select: none;
 }
 
 .result-action {
