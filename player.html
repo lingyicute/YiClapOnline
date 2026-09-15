@@ -15,6 +15,7 @@
       font-family: 'Material Symbols Rounded';
       font-style: normal;
       font-weight: 400;
+      font-display: block; /* 图标字体必须 block：swap 会先把 "play_arrow" 这种连字名当文字显示出来（同 index.html） */
       src: url('./assets/MaterialSymbols.woff2') format('woff2');
     }
     .material-symbols-rounded {
@@ -77,6 +78,18 @@
       height: 60px;
       margin-bottom: 20px;
     }
+
+    /*
+     * 默认隐藏的元素也必须在这里内联（与 index.html 中的做法同理）：
+     * player.css 是异步加载的，在它到达之前这些元素若没有任何样式，
+     * 文字会裸露在页面上闪一下——加载遮罩在歌曲接口返回后就会淡出，
+     * 若此时 player.css 还没到位（冷缓存 / 弱网），下载弹窗就会闪现再消失。
+     * 这些规则与 player.css 里的定义一致，只是提前生效。
+     */
+    .download-modal,
+    .download-modal-overlay { opacity: 0; visibility: hidden; position: fixed; }
+    .download-modal.active,
+    .download-modal-overlay.active { opacity: 1; visibility: visible; }
   </style>
 
   <!-- 资源加载器，与 index.html 中的同源；说明见 index.html -->
@@ -214,7 +227,6 @@
       <button id="downloadClose" type="button">关闭</button>
     </div>
   </div>
-
 </body>
 
 </html>
