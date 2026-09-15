@@ -717,78 +717,107 @@ function syncThemeIcon() {
 
 /**
  * 版本检查和更新提示 - 已迁移至 localStorage
+ * 上游 version 为时间戳，直接数值比较即可
  */
+const UPDATE_PENDING_KEY = 'yiclape:updating';
+
 const updateControl = {
+  async clearAllCaches() {
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch {}
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+    } catch {}
+  },
+
   async checkForUpdate() {
     try {
-      let localVersion = '0';
+      // 上次点击刷新后 reload 回来，提交版本号
       try {
-        localVersion = localStorage.getItem(VERSION_KEY) || '0';
-      } catch (e) {
-        console.warn('[更新] 读取本地版本失败:', e);
-      }
+        const pending = sessionStorage.getItem(UPDATE_PENDING_KEY);
+        if (pending) {
+          localStorage.setItem(VERSION_KEY, pending);
+          sessionStorage.removeItem(UPDATE_PENDING_KEY);
+          try { cookieStore.remove(LEGACY_VERSION_COOKIE); } catch {}
+          return;
+        }
+      } catch {}
 
-      const response = await fetch('./update.json?' + Date.now());
-      if (!response.ok) {
-        console.error('获取更新信息失败:', response.status);
-        return;
-      }
+      let localVersion = '0';
+      try { localVersion = localStorage.getItem(VERSION_KEY) || '0'; } catch {}
 
-      const updateData = await response.json();
-      if (updateData.version > localVersion) {
-        this.showUpdateModal(updateData);
+      const res = await fetch('./update.json?' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.version) return;
+      if (Number(data.version) > Number(localVersion)) {
+        this.showUpdateModal(data);
       }
-    } catch (error) {
-      console.error('检查更新出错:', error);
+    } catch (e) {
+      console.error('检查更新出错:', e);
     }
   },
 
-  showUpdateModal(updateData) {
+  showUpdateModal(data) {
     const modal = document.getElementById('updateModal');
     const overlay = document.getElementById('updateOverlay');
     const updateTime = document.getElementById('updateTime');
     const updateList = document.getElementById('updateList');
     const refreshButton = document.getElementById('refreshButton');
+    if (!modal || !overlay || !updateTime || !updateList || !refreshButton) return;
 
-    if (!modal || !overlay || !updateTime || !updateList || !refreshButton) {
-      console.error('找不到更新提示弹窗元素');
-      return;
-    }
-
-    updateTime.textContent = `更新时间: ${updateData.updateTime}`;
+    updateTime.textContent = `更新时间: ${data.updateTime}`;
     updateList.innerHTML = '';
-    updateData.changes.forEach(change => {
+    (data.changes || []).forEach(c => {
       const li = document.createElement('li');
-      li.textContent = change;
+      li.textContent = c;
       updateList.appendChild(li);
     });
 
-    refreshButton.onclick = () => {
-      try {
-        localStorage.setItem(VERSION_KEY, updateData.version);
-      } catch (e) {
-        console.error('[更新] 保存版本失败:', e);
-      }
+    const newBtn = refreshButton.cloneNode(true);
+    refreshButton.parentNode.replaceChild(newBtn, refreshButton);
+    const btn = document.getElementById('refreshButton');
 
-      // 防御性清理遗留 cookie（迁移时已删，此处再次确保）
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = '更新中...';
       try {
-        cookieStore.remove(LEGACY_VERSION_COOKIE);
-      } catch {}
-
-      // 清除缓存后强制刷新
-      if ('caches' in window) {
-        caches.keys().then(names => names.forEach(name => caches.delete(name)));
+        try { sessionStorage.setItem(UPDATE_PENDING_KEY, data.version); } catch {}
+        try { cookieStore.remove(LEGACY_VERSION_COOKIE); } catch {}
+        await this.clearAllCaches();
+        // 加时间戳击穿 HTTP 缓存
+        const url = new URL(location.href);
+        url.searchParams.set('__v', Date.now().toString());
+        location.href = url.toString();
+        setTimeout(() => location.reload(), 1000);
+      } catch {
+        btn.disabled = false;
+        btn.textContent = '刷新';
+        try { sessionStorage.removeItem(UPDATE_PENDING_KEY); } catch {}
       }
-      window.location.reload();
     };
 
     overlay.classList.add('active');
     modal.classList.add('active');
+    overlay.onclick = () => {
+      overlay.classList.remove('active');
+      modal.classList.remove('active');
+    };
   },
 
-  // 延迟 1 秒检查，避免和首屏资源抢带宽
   init() {
     setTimeout(() => this.checkForUpdate(), 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.checkForUpdate();
+    });
+    setInterval(() => this.checkForUpdate(), 30 * 60 * 1000);
   }
 };
 
