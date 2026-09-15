@@ -1823,13 +1823,6 @@ function renderDownloadRow(list, item, safeTitle) {
     row.appendChild(size);
   }
 
-  if (item.warn) {
-    const warn = document.createElement('span');
-    warn.className = 'download-warn';
-    warn.textContent = item.warn;
-    row.appendChild(warn);
-  }
-
   const dlBtn = document.createElement('button');
   dlBtn.type = 'button';
   dlBtn.className = 'download-row-btn';
@@ -1894,7 +1887,7 @@ async function openDownloadModal() {
     for (const q of QUALITY_LEVELS.filter(q => q.level !== 'standard')) {
       try {
         const r = await musicSource.getTrackUrl(currentSong.id, q.level);
-        renderDownloadRow(list, { label: q.label, url: r.url, size: r.size, warn: q.warn }, safeTitle);
+        renderDownloadRow(list, { label: q.label, url: r.url, size: r.size }, safeTitle);
       } catch {
         const row = document.createElement('div');
         row.className = 'download-row download-row--error';
