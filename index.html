@@ -33,7 +33,7 @@
     }
 
     /* 加载遮罩的关键样式内联在此：style.css 是异步加载的，遮罩不能等它 */
-    html { background-color: #f9f9f9; }
+    html { background-color: #f9f9f9; font-family: sans-serif; } /* style.css 到达后会被 Nebulove 覆盖 */
     html.dark-theme { background-color: #121212; }
     .main-loading-overlay {
       position: fixed; inset: 0; z-index: 10000;
@@ -43,7 +43,7 @@
     }
     html.dark-theme .main-loading-overlay { background-color: #121212; }
     .main-loading-overlay img { width: 60px; }
-    .main-loading-overlay .boot-error { font: 15px/1.6 sans-serif; color: #c62828; text-align: center; padding: 0 24px; }
+    .main-loading-overlay .boot-error { font-size: 15px; line-height: 1.6; color: #c62828; text-align: center; padding: 0 24px; }
 
     /*
      * 默认隐藏的元素也必须在这里内联：
