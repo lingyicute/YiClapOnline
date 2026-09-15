@@ -157,6 +157,10 @@
     <span class="material-symbols-rounded" aria-hidden="true">dark_mode</span>
   </button>
 
+  <button id="quality-btn" class="top-btn" type="button" aria-label="音质设置" title="音质设置">
+    <span class="material-symbols-rounded" aria-hidden="true">graphic_eq</span>
+  </button>
+
   <!-- 主页加载覆盖层 -->
   <div id="main-loading-overlay" class="main-loading-overlay" aria-hidden="true">
     <img src="./assets/loading.svg" alt="">
@@ -239,6 +243,19 @@
     </div>
     <div class="update-modal-button">
       <button id="refreshButton" type="button">刷新</button>
+    </div>
+  </div>
+
+  <!-- 音质选择弹窗 -->
+  <div class="update-modal-overlay" id="qualityOverlay"></div>
+  <div class="update-modal" id="qualityModal" role="dialog" aria-modal="true" aria-labelledby="qualityModalTitle">
+    <div class="update-modal-title" id="qualityModalTitle">选择在线收听音质</div>
+    <div class="update-modal-content">
+      <p class="quality-hint">在线播放将按所选音质加载，高音质会耗费更多流量：</p>
+      <div class="quality-list" id="qualityList"></div>
+    </div>
+    <div class="update-modal-button">
+      <button id="qualityConfirm" type="button">保存</button>
     </div>
   </div>
 </body>

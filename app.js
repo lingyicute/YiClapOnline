@@ -144,6 +144,39 @@ function normalizeId(value) {
   return value === undefined || value === null ? '' : String(value);
 }
 
+/* ==========================================================================
+ * 音质档位（在线收听 / 下载共用）
+ * 后端 getSongUrl 的 level 支持以下种类；用户选择存进独立的 localStorage 键。
+ * ========================================================================== */
+
+const QUALITY_LEVELS = [
+  { level: 'standard', label: '标准音质' },
+  { level: 'exhigh',   label: '极高音质' },
+  { level: 'lossless', label: '无损音质', warn: '无损音质每首歌可能有 30MB 以上' },
+  { level: 'hires',    label: 'Hi-Res 音质', warn: 'Hi-Res 音质每首歌可能有 50MB 以上' },
+  { level: 'jyeffect', label: '高清环绕声', warn: '高清环绕声每首歌可能有 80MB 以上' },
+  { level: 'jymaster', label: '超清母带', warn: '超清母带每首歌可能有 150MB 以上' },
+];
+
+// 独立的存储键，不与主题 / 收藏等已有键混用
+const QUALITY_KEY = 'yiclape:audio-quality';
+const DEFAULT_QUALITY = 'standard';
+
+/** 读取用户选择的音质（未选择时退回默认 standard） */
+function getQuality() {
+  try {
+    const v = localStorage.getItem(QUALITY_KEY);
+    return QUALITY_LEVELS.some(q => q.level === v) ? v : DEFAULT_QUALITY;
+  } catch {
+    return DEFAULT_QUALITY;
+  }
+}
+
+/** 保存用户选择的音质 */
+function setQuality(level) {
+  try { localStorage.setItem(QUALITY_KEY, level); } catch { /* 存储不可用时静默 */ }
+}
+
 /**
  * 主题控制 - 读取 localStorage['yiclape:darkmode'] 并应用相应主题
  * '1': 深色主题, 其它/不存在: 浅色主题(默认)
@@ -333,7 +366,7 @@ const musicSource = {
   async getTrack(id) {
     const data = await this._request('getSongUrl', {
       id,
-      level: 'standard',
+      level: getQuality(),
     });
     if (!data || !data.url) throw new Error('该歌曲暂时无法播放');
     return {
@@ -343,6 +376,18 @@ const musicSource = {
       cover: '',
       audioUrl: data.url,
     };
+  },
+
+  /**
+   * 按 ID + 指定音质换取音频直链与大小（用于下载弹窗逐档解析）。
+   * @param {string} id
+   * @param {string} level - 见 QUALITY_LEVELS
+   * @returns {Promise<{url: string, size: number, br: number}>}
+   */
+  async getTrackUrl(id, level) {
+    const data = await this._request('getSongUrl', { id, level });
+    if (!data || !data.url) throw new Error('该音质暂不可用');
+    return { url: data.url, size: data.size || 0, br: data.br || 0 };
   }
 };
 
@@ -1195,6 +1240,63 @@ const updateControl = {
 };
 
 /**
+ * 打开音质选择弹窗（在线收听音质）。
+ * 首次访问且尚未选择过会自动弹出；也可通过右上角按钮随时重新打开。
+ * 选择写入独立 localStorage 键 yiclape:audio-quality。
+ */
+function openQualityModal() {
+  const modal = document.getElementById('qualityModal');
+  const overlay = document.getElementById('qualityOverlay');
+  const list = document.getElementById('qualityList');
+  if (!modal || !overlay || !list) return;
+  if (modal.classList.contains('active')) return;
+
+  list.innerHTML = '';
+  let selected = getQuality();
+
+  QUALITY_LEVELS.forEach(q => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'quality-option' + (q.level === selected ? ' active' : '');
+    item.dataset.level = q.level;
+
+    const label = document.createElement('span');
+    label.className = 'quality-label';
+    label.textContent = q.label;
+    item.appendChild(label);
+
+    if (q.warn) {
+      const warn = document.createElement('span');
+      warn.className = 'quality-warn';
+      warn.textContent = q.warn;
+      item.appendChild(warn);
+    }
+
+    item.addEventListener('click', () => {
+      selected = q.level;
+      list.querySelectorAll('.quality-option').forEach(o => o.classList.toggle('active', o.dataset.level === selected));
+    });
+    list.appendChild(item);
+  });
+
+  const confirmBtn = document.getElementById('qualityConfirm');
+  const close = () => {
+    // 无论点“保存”还是点遮罩/Esc 关闭，都记下当前选择（默认 standard），避免首次访问被反复弹窗
+    setQuality(selected);
+    overlay.classList.remove('active');
+    modal.classList.remove('active');
+    document.removeEventListener('keydown', onKeydown);
+  };
+  const onKeydown = e => { if (e.key === 'Escape') close(); };
+  confirmBtn.onclick = close;
+  overlay.onclick = close;
+  document.addEventListener('keydown', onKeydown);
+
+  overlay.classList.add('active');
+  modal.classList.add('active');
+}
+
+/**
  * 主页入口
  */
 function initMainPage() {
@@ -1229,6 +1331,14 @@ function initMainPage() {
     themeControl.toggleTheme();
     syncThemeIcon();
   });
+
+  // 音质设置：右上角按钮随时打开；首次访问且未选择过则自动弹出（等加载遮罩淡出后再弹，避免遮挡）
+  document.getElementById('quality-btn')?.addEventListener('click', openQualityModal);
+  try {
+    if (localStorage.getItem(QUALITY_KEY) === null) {
+      setTimeout(openQualityModal, 700);
+    }
+  } catch {}
 
   // 收藏按钮：在收藏列表与之前的界面之间切换
   document.getElementById('favorites-btn')?.addEventListener('click', () => {
@@ -1660,6 +1770,150 @@ function syncPlayerThemeIcon() {
 }
 
 /**
+ * 把字节数格式化成 MB / GB（下载弹窗展示用）
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const mb = n / (1024 * 1024);
+  if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+  return mb.toFixed(1) + ' MB';
+}
+
+/**
+ * 无感唤起下载：fetch 音频为 Blob 后通过 <a download> 在当前页触发下载，不打开新页面/新标签页。
+ * 依赖音频 CDN 的 CORS（已确认返回 Access-Control-Allow-Origin: *）。
+ * @param {string} url
+ * @param {string} filename
+ */
+async function seamlessDownload(url, filename) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
+  } catch (e) {
+    console.warn('下载失败（可能为跨域或网络限制）:', e);
+  }
+}
+
+/** 在下载弹窗里追加一行（某音质 + 大小 + 下载按钮） */
+function renderDownloadRow(list, item, safeTitle) {
+  const row = document.createElement('div');
+  row.className = 'download-row';
+
+  const label = document.createElement('span');
+  label.className = 'download-label';
+  label.textContent = item.label;
+  row.appendChild(label);
+
+  if (item.size) {
+    const size = document.createElement('span');
+    size.className = 'download-size';
+    size.textContent = formatSize(item.size);
+    row.appendChild(size);
+  }
+
+  if (item.warn) {
+    const warn = document.createElement('span');
+    warn.className = 'download-warn';
+    warn.textContent = item.warn;
+    row.appendChild(warn);
+  }
+
+  const dlBtn = document.createElement('button');
+  dlBtn.type = 'button';
+  dlBtn.className = 'download-row-btn';
+  dlBtn.textContent = '下载';
+  dlBtn.addEventListener('click', () => {
+    // 用直链后缀决定文件扩展名（无损类为 flac，标准/极高类为 mp3）
+    const ext = (item.url.split('?')[0].match(/\.(\w+)$/) || [, 'mp3'])[1];
+    seamlessDownload(item.url, `${safeTitle} (${item.label}).${ext}`);
+  });
+  row.appendChild(dlBtn);
+
+  list.appendChild(row);
+}
+
+/**
+ * 下载弹窗：先展示标准音质及其大小，并提供“继续解析 VIP 和 SVIP 音质”按钮；
+ * 点击后逐个解析更高音质并呈现大小，每行可无感下载。
+ */
+async function openDownloadModal() {
+  const modal = document.getElementById('downloadModal');
+  const overlay = document.getElementById('downloadOverlay');
+  const list = document.getElementById('downloadList');
+  if (!modal || !overlay || !list || !currentSong?.id) return;
+  if (modal.classList.contains('active')) return;
+
+  const safeTitle = (currentSong.title || 'music').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'music';
+  list.innerHTML = '<div class="download-loading">正在解析标准音质…</div>';
+
+  const close = () => {
+    overlay.classList.remove('active');
+    modal.classList.remove('active');
+    document.removeEventListener('keydown', onKeydown);
+  };
+  const onKeydown = e => { if (e.key === 'Escape') close(); };
+  document.getElementById('downloadClose').onclick = close;
+  overlay.onclick = close;
+  document.addEventListener('keydown', onKeydown);
+  overlay.classList.add('active');
+  modal.classList.add('active');
+
+  // 先解析并展示标准音质
+  try {
+    const std = await musicSource.getTrackUrl(currentSong.id, 'standard');
+    list.querySelector('.download-loading')?.remove();
+    renderDownloadRow(list, { label: '标准音质', url: std.url, size: std.size }, safeTitle);
+  } catch (e) {
+    list.querySelector('.download-loading')?.remove();
+    const err = document.createElement('div');
+    err.className = 'download-error';
+    err.textContent = '标准音质解析失败：' + (e.message || '请稍后重试');
+    list.appendChild(err);
+  }
+
+  // “继续解析 VIP 和 SVIP 音质”按钮
+  const moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.className = 'download-more-btn';
+  moreBtn.textContent = '继续解析 VIP 和 SVIP 音质';
+  moreBtn.addEventListener('click', async () => {
+    moreBtn.disabled = true;
+    moreBtn.textContent = '正在解析更高音质…';
+    for (const q of QUALITY_LEVELS.filter(q => q.level !== 'standard')) {
+      try {
+        const r = await musicSource.getTrackUrl(currentSong.id, q.level);
+        renderDownloadRow(list, { label: q.label, url: r.url, size: r.size, warn: q.warn }, safeTitle);
+      } catch {
+        const row = document.createElement('div');
+        row.className = 'download-row download-row--error';
+        const label = document.createElement('span');
+        label.className = 'download-label';
+        label.textContent = q.label;
+        const warn = document.createElement('span');
+        warn.className = 'download-warn';
+        warn.textContent = '解析失败';
+        row.append(label, warn);
+        list.appendChild(row);
+      }
+    }
+    moreBtn.remove();
+  });
+  list.appendChild(moreBtn);
+}
+
+/**
  * 播放器入口
  */
 function initPlayerPage() {
@@ -1725,24 +1979,8 @@ function initPlayerPage() {
     }
   });
 
-  // 下载按钮
-  document.querySelector('[data-download]')?.addEventListener('click', () => {
-    if (!audioSource.src || audioSource.error) return;
-
-    const rawTitle = document.querySelector('[data-title]')?.textContent || 'music';
-    // 去掉文件名里不允许的字符
-    const filename = rawTitle.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'music';
-
-    const link = document.createElement('a');
-    link.href = audioSource.src;
-    link.download = `${filename}.mp3`;
-    // 跨域直链上 download 属性会被浏览器忽略而直接导航；开新标签至少不会把播放器页面替换掉
-    link.target = '_blank';
-    link.rel = 'noopener';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  });
+  // 下载按钮：打开下载弹窗（音质选择 + 无感下载，不打开新页面）
+  document.querySelector('[data-download]')?.addEventListener('click', openDownloadModal);
 
   // 循环播放按钮
   const loopBtn = document.querySelector('[data-loop]');

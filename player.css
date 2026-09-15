@@ -889,3 +889,158 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* 下载弹窗（音质选择 + 无感下载） */
+.download-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background-color: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.download-modal-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.download-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.95);
+  width: 90%;
+  max-width: 48rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 2001;
+  opacity: 0;
+  visibility: hidden;
+  background-color: var(--eerie-black);
+  border: 1px solid var(--surface-variant);
+  border-radius: var(--radius-24);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  padding: 2.4rem;
+  color: var(--on-background);
+  transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease;
+}
+
+.download-modal.active {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.download-modal-title {
+  font-size: 1.8rem;
+  font-weight: var(--fw-500);
+  margin-bottom: 1.6rem;
+}
+
+.download-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.download-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.2rem;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+:root.dark-theme .download-row {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.download-row--error {
+  opacity: 0.7;
+}
+
+.download-label {
+  font-weight: var(--fw-500);
+  font-size: 1.4rem;
+  white-space: nowrap;
+}
+
+.download-size {
+  font-size: 1.3rem;
+  opacity: 0.7;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.download-warn {
+  font-size: 1.1rem;
+  color: #ffce6b;
+  white-space: nowrap;
+}
+
+.download-row-btn {
+  flex-shrink: 0;
+  padding: 0.6rem 1.4rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 1.3rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.download-row-btn:hover {
+  opacity: 0.9;
+}
+
+.download-more-btn {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  padding: 1rem 1.6rem;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--primary);
+  font-size: 1.4rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.download-more-btn:hover {
+  background: rgba(66, 133, 244, 0.08);
+}
+
+.download-more-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.download-loading,
+.download-error {
+  font-size: 1.4rem;
+  opacity: 0.8;
+  padding: 0.8rem 0.4rem;
+}
+
+.download-modal-button {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.8rem;
+}
+
+#downloadClose {
+  border: none;
+  border-radius: 4px;
+  padding: 0.8rem 1.8rem;
+  font-size: 1.4rem;
+  font-family: inherit;
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: pointer;
+}
