@@ -647,6 +647,9 @@ main {
   transform: translate(-50%, -50%) scale(0.9);
   width: 90%;
   max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  font-family: 'Nebulove', sans-serif; /* 与搜索框一致的全局字体 */
   background-color: white;
   border-radius: 12px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
@@ -681,7 +684,8 @@ main {
 }
 
 .update-modal-content ul {
-  padding-left: 20px;
+  list-style: none;
+  padding: 0;
   margin: 0;
 }
 
@@ -697,6 +701,7 @@ main {
 }
 
 .update-modal-button button {
+  font-family: inherit;
   background-color: var(--primary-color);
   color: white;
   border: none;
