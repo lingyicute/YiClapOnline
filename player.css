@@ -367,6 +367,10 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   cursor: pointer;
   background: transparent;
   width: 100%;
+  /* Firefox 不给高度时控件近 21px 且轨道垂直居中，Chrome 则为轨道高(6px)：
+     钉住 6px 让两种引擎的轨道都落在同一处（thumb 16px 溢出渲染不受影响） */
+  height: 6px;
+  padding: 0;
 }
 
 .range::-webkit-slider-runnable-track {
@@ -379,7 +383,10 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .range-fill {
   position: absolute;
-  top: 0;
+  /* 曾用 top: 0：Firefox 控件较高、轨道居中，蓝色填充会悬在轨道上方约 7px（错位）。
+     两种引擎的原生轨道都位于控件垂直中心，fill 跟着居中即可与拇指/轨道对齐 */
+  top: 50%;
+  transform: translateY(-50%);
   left: 0;
   width: 0;
   height: 6px;
