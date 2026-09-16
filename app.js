@@ -294,7 +294,6 @@ const musicSource = {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'User-Agent': this._ua,
             },
             body: JSON.stringify({ ...body, ip: this._randomIp() }),
           });
