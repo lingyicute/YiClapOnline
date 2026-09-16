@@ -5,7 +5,7 @@
  *
  * 更新检测就是拿它和线上 update.json 比：不一致 => 用户跑的是旧代码 => 提示刷新。
  */
-const APP_VERSION = '202609162402';
+const APP_VERSION = '202609162403';
 
 /**
  * YiClapOnline —— 主页(index.html)与播放器(player.html)共用的唯一脚本。
@@ -16,7 +16,8 @@ const APP_VERSION = '202609162402';
  * 文件结构：
  *   1. 共享层     localStorage(主题/版本) + 旧 cookie 迁移清理
  *   2. 数据源层   musicSource —— 换源只需要改这一节
- *   2.5 收藏      依赖 musicSource.id 做"换源即作废"，所以放在数据源之后
+ *   2.5 收集上报  成功播放后静默上报(移植自 QQMusicParser)，只上报、不兜底播放
+ *   2.6 收藏      依赖 musicSource.id 做"换源即作废"，所以放在数据源之后
  *   3. 主页       搜索、结果列表、收藏列表
  *   4. 播放器     取歌、播放控制、音量
  *   5. 入口
@@ -133,15 +134,6 @@ try {
   runLegacyMigrations();
 } catch (e) {
   console.warn('[迁移] 初始化迁移失败:', e);
-}
-
-/**
- * 把任意 id 统一成非空字符串（null/undefined -> ''）。
- * 数据源若返回数字 id，之前 add() 会原样存进去、read() 又只认字符串，
- * 结果是"收藏成功但列表里永远看不到"。所有入口统一走这里即可。
- */
-function normalizeId(value) {
-  return value === undefined || value === null ? '' : String(value);
 }
 
 /* ==========================================================================
@@ -389,6 +381,129 @@ const musicSource = {
     return { url: data.url, size: data.size || 0, br: data.br || 0 };
   }
 };
+
+/* ==========================================================================
+   2.5 收集上报 (Collectors) —— 移植自 QQMusicParser，只上报、不兜底播放
+   ==========================================================================
+   * 逻辑：成功拿到歌曲文件直链 → 后台探测实际时长 > 60 秒 → 上报收集器。
+   * 上报内容：歌曲直链 url、歌名 title、歌手 author、封面 pic、歌词 lrc、
+             平台内歌曲 ID(网易云) 与数据源标识 source，以及探测到的时长。
+   * 去重：Worker 端按 url / title-author / id 检查；前端另有 musicdb 的已收集
+          集合去重。
+   * 上报入口在播放器的 loadTrack()：只有拿到可播放直链才走到这里，主页不触发。
+   * 页面加载后立即静默拉取 musicdb 的 list.txt 做前端去重；失败静默降级(不拦截上报)。
+   * 注意：本项目的兜底播放走的是数据源自身的重试与错误提示，
+          收集库(musicdb)不参与播放，只用于"已收集则不上报"的去重判断。
+   ========================================================================== */
+
+const MUSICDB_BASE = 'https://musicdb.92li.uk';
+const COLLECTOR_URL = 'https://music-collector.92li.uk/report';
+const COLLECTOR_MIN_DURATION = 60; // 歌曲实际时长下限(秒)，≤60 秒不上报
+
+let musicdbList = new Set();    // 已收集集合：每项为【歌名-歌手】
+let musicdbListLoaded = false;  // list.txt 是否拉取成功
+
+/**
+ * 把任意 id 统一成非空字符串（null/undefined -> ''）。
+ * 数据源若返回数字 id，之前 add() 会原样存进去、read() 又只认字符串，
+ * 结果是"收藏成功但列表里永远看不到"。所有入口统一走这里即可。
+ */
+function normalizeId(value) {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+/* 与收集器后端的 sanitizeName 完全一致的清洗函数，保证算出的 stem 与 list.txt / 文件夹名一致 */
+function sanitizeStem(s, maxLen) {
+  maxLen = maxLen || 80;
+  let out = String(s || '')
+    .replace(/[\/\\?%*:|"<>]/g, '_')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/\.+$/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (out.length > maxLen) out = out.slice(0, maxLen).trim();
+  if (!out || /^[._\s]+$/.test(out) || /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(out)) out = 'unknown';
+  return out;
+}
+
+/** 收集库用的唯一键：歌名-歌手（移植自 QQMusicParser） */
+function songStem(song) {
+  return sanitizeStem(song.title) + '-' + sanitizeStem(song.author);
+}
+
+/* 静默拉取 musicdb 的 list.txt 供上报前去重（失败不打扰用户，也不拦截上报） */
+function loadMusicdbList() {
+  fetch(MUSICDB_BASE + '/list.txt', { cache: 'no-store' })
+    .then(r => {
+      if (!r.ok) return;
+      return r.text().then(text => {
+        const set = new Set();
+        for (const line of text.split('\n')) {
+          const t = line.trim();
+          if (t) set.add(t);
+        }
+        musicdbList = set;
+        musicdbListLoaded = true;
+        if (console && console.info) console.info('[musicdb] 已收集 ' + set.size + ' 首');
+      });
+    })
+    .catch(() => { /* 静默失败 */ });
+}
+
+/**
+ * 后台探测歌曲实际时长，满足条件(> COLLECTOR_MIN_DURATION)则上报收集器。
+ * 不阻塞播放，任何失败静默丢弃，绝不影响用户。
+ *
+ * @param {string} fileUrl - 拿到的可播放直链
+ * @param {{id: string, title: string, artist: string, cover: string}} track - 播放器页的 track(含补齐后的元数据)
+ */
+function reportToCollector(fileUrl, track) {
+  if (!COLLECTOR_URL || COLLECTOR_URL.includes('YOUR_ACCOUNT')) return;
+  if (!fileUrl || !/^https?:\/\//i.test(fileUrl)) return;
+
+  const payload = () => ({
+    title: (track.title || '').trim(),
+    author: (track.artist || '').trim(),
+    pic: track.cover || '',
+    url: fileUrl,
+    id: normalizeId(track.id),      // 网易云歌曲 ID，Worker 用它做额外去重
+    lrc: '',                        // 本项目数据源不返回歌词，留空
+    source: musicSource.id || musicSource.name || '',
+    duration: 0,
+  });
+
+  // 前端去重：收集库已收录的歌不再上报（Worker 侧还会有一次检查）
+  const dedupe = payload();
+  try {
+    if (musicdbListLoaded && musicdbList.has(songStem({ title: dedupe.title, author: dedupe.author }))) return;
+  } catch (_) { /* 去重失败不拦截上报 */ }
+
+  try {
+    const probe = new Audio();
+    probe.preload = 'metadata';
+    let done = false;
+    const cleanup = () => { try { probe.src = ''; probe.removeAttribute('src'); probe.load(); } catch (_) {} };
+    const timer = setTimeout(() => { if (!done) { done = true; cleanup(); } }, 20000);
+    probe.onloadedmetadata = () => {
+      if (done) return; done = true; clearTimeout(timer);
+      const dur = probe.duration;
+      cleanup();
+      if (!Number.isFinite(dur) || dur <= COLLECTOR_MIN_DURATION) return; // ≤60 秒不上报
+      const body = payload();
+      body.duration = Math.round(dur);
+      if (!body.title || !body.author || !body.url) return;
+      fetch(COLLECTOR_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        mode: 'cors',
+        keepalive: true,
+      }).catch(() => { /* 上报失败不打扰用户 */ });
+    };
+    probe.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); } };
+    probe.src = fileUrl;
+  } catch (_) { /* 忽略所有上报异常 */ }
+}
 
 /**
  * 收藏 —— 只用 localStorage
@@ -1751,6 +1866,10 @@ async function loadTrack() {
     track.cover = track.cover || meta.cover;
     track.vip = track.vip || meta.vip;
     updatePlayerUI(track);
+
+    // 上报收集器（移植自 QQMusicParser，只上报、不兜底播放）：
+    // 成功拿到可播放直链后，后台探测实际时长 > 60s 再上报，不阻塞播放、失败静默丢弃。
+    reportToCollector(track.audioUrl, track);
   } catch (error) {
     console.error('获取歌曲信息失败:', error);
     showPlayerError('获取歌曲失败', error?.message || '请稍后重试');
@@ -1911,6 +2030,10 @@ async function openDownloadModal() {
 function initPlayerPage() {
   audioSource = new Audio();
   audioSource.preload = 'metadata';
+
+  // 上报前的去重依赖 musicdb 的 list.txt，进播放器页就静默预拉取（fire-and-forget）
+  loadMusicdbList();
+
   playBtn = document.querySelector('[data-play-btn]');
   playerSeekRange = document.querySelector('[data-seek]');
   playerRunningTime = document.querySelector('[data-running-time]');
