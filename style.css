@@ -46,6 +46,12 @@
   box-sizing: border-box;
 }
 
+/* iOS Safari 对只写在 body 上的 overflow-x:hidden 不可靠：内容一旦超宽，
+   整页仍可被横向拖动，居中的搜索框会被推出屏幕。html 上也写一份双保险。 */
+html {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -173,6 +179,11 @@ header {
 
 .search-box input {
   flex: 1;
+  /* flex 子项默认 min-width:auto(=固有宽度，由 size 属性×字体字宽决定)。
+     iOS 上 Nebulove(1.28MB) 未加载完时按回退中文字体(PingFang 等)的字宽计算，
+     固有宽度会超过可用空间，把搜索按钮整个挤出搜索框、再被 overflow:hidden 裁掉。
+     允许收缩到 0 后，按钮在任何字体/任何加载阶段都保得住。 */
+  min-width: 0;
   height: 100%;
   padding: 0 20px;
   border: none;
@@ -186,6 +197,9 @@ header {
 .search-box button {
   width: 100px;
   height: 100%;
+  /* Safari 对固定宽度子项的 flex 收缩处理与其他引擎不同(会过度压缩)，
+     按钮永远保持原宽，空间不足时由输入框(min-width:0)让位 */
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;

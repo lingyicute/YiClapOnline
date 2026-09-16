@@ -59,6 +59,15 @@
     .update-modal-overlay { opacity: 0; visibility: hidden; position: fixed; }
     .update-modal.active,
     .update-modal-overlay.active { opacity: 1; visibility: visible; }
+
+    /*
+     * 搜索输入框字号也必须在这里内联兜底：
+     * iOS 上聚焦一个字号小于 16px 的输入框会触发页面自动放大，且失焦后不会还原，
+     * 右侧的搜索按钮会被推出视口。style.css 是异步加载的，在它到达之前输入框
+     * 只有 UA 默认字号(部分 iOS 版本上小于 16px)；这里先钉在 16px，
+     * style.css 加载后会被其中的规则覆盖(桌面 18px / 移动 16px)。
+     */
+    .search-box input { font-size: 16px; }
     .player-container { visibility: hidden; position: fixed; right: -100%; }
     .player-container.active { visibility: visible; right: 0; }
   </style>
