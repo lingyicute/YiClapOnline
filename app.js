@@ -349,9 +349,10 @@ const musicSource = {
    *
    * 注意：后端 getSongUrl 只返回音频直链，不返回标题/歌手/封面等元数据，
    * 这些字段由播放页从搜索结果带入的 URL 参数补齐（见 loadTrack）。
+   * size/br 一并带回：上报收集器前用 size 判断是否超限(>20MB 则降级到极高音质)。
    *
    * @param {string} id - search() 返回的 id
-   * @returns {Promise<{id: string, title: string, artist: string, cover: string, audioUrl: string}>}
+   * @returns {Promise<{id: string, title: string, artist: string, cover: string, audioUrl: string, size: number, br: number}>}
    * @throws {Error} 歌曲不存在、无版权、或音频地址换取失败
    */
   async getTrack(id) {
@@ -366,6 +367,8 @@ const musicSource = {
       artist: '',
       cover: '',
       audioUrl: data.url,
+      size: data.size || 0,
+      br: data.br || 0,
     };
   },
 
@@ -385,7 +388,8 @@ const musicSource = {
 /* ==========================================================================
    2.5 收集上报 (Collectors) —— 移植自 QQMusicParser，只上报、不兜底播放
    ==========================================================================
-   * 逻辑：成功拿到歌曲文件直链 → 后台探测实际时长 > 60 秒 → 上报收集器。
+   * 逻辑：成功拿到歌曲文件直链 → 查文件大小(>20MB 则降级用极高音质直链)
+   *       → 后台探测实际时长 > 60 秒 → 上报收集器。
    * 上报内容：歌曲直链 url、歌名 title、歌手 author、封面 pic、歌词 lrc、
              平台内歌曲 ID(网易云，沿用字段名 songmid) 与数据源标识 source，以及探测到的时长。
    * 去重：Worker 端按 url / title-author / id 检查；前端另有 musicdb 的已收集
@@ -399,6 +403,8 @@ const musicSource = {
 const MUSICDB_BASE = 'https://musicdb.92li.uk';
 const COLLECTOR_URL = 'https://music-collector.92li.uk/report';
 const COLLECTOR_MIN_DURATION = 60; // 歌曲实际时长下限(秒)，≤60 秒不上报
+const COLLECTOR_MAX_FILE_SIZE = 20 * 1024 * 1024; // 上报文件大小上限(字节)，超过则改报极高音质直链
+const COLLECTOR_FALLBACK_LEVEL = 'exhigh'; // 超限时的替代音质(按约定不超过 15MB)
 
 let musicdbList = new Set();    // 已收集集合：每项为【歌名-歌手】
 let musicdbListLoaded = false;  // list.txt 是否拉取成功
@@ -451,21 +457,83 @@ function loadMusicdbList() {
 }
 
 /**
+ * 探测远程音频文件的字节大小，拿不到返回 0(调用方按"未知"处理，不拦截上报)。
+ * 先 HEAD 读 Content-Length(它是 CORS safelisted 头，无需 CDN 额外 expose)；
+ * HEAD 拿不到再试 Range: bytes=0-0，从 Content-Range 的 /total 解析。
+ * 只读响应头(外加 Range 的 1 个字节)，不下载整个文件。
+ *
+ * @param {string} url - 音频直链
+ * @returns {Promise<number>} 文件字节数，未知返回 0
+ */
+async function getRemoteFileSize(url) {
+  const parsePositiveInt = v => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  // 1. HEAD 请求：最省流量，大多数 CDN 都支持
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(url, { method: 'HEAD', signal: ctrl.signal });
+      if (res.ok) {
+        const size = parsePositiveInt(res.headers.get('content-length'));
+        if (size > 0) return size;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (_) { /* 换 Range 再试 */ }
+
+  // 2. Range 回退：只取首字节，从 Content-Range 的 /total 拿完整大小
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal: ctrl.signal });
+      if (res.ok || res.status === 206) {
+        const m = /\/(\d+)\s*$/.exec(res.headers.get('content-range') || '');
+        if (m) {
+          const size = parsePositiveInt(m[1]);
+          if (size > 0) return size;
+        }
+        // 服务端若无视 Range 会返回 200 + 完整 Content-Length；此时它就是文件大小。
+        // (命中 Range 时这里是 1，必须排除，否则会误判成 1 字节)
+        if (res.status === 200) {
+          const size = parsePositiveInt(res.headers.get('content-length'));
+          if (size > 1) return size;
+        }
+      }
+      try { if (res.body && typeof res.body.cancel === 'function') await res.body.cancel(); } catch (_) {}
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (_) { /* 拿不到就返回 0 */ }
+
+  return 0;
+}
+
+/**
  * 后台探测歌曲实际时长，满足条件(> COLLECTOR_MIN_DURATION)则上报收集器。
  * 不阻塞播放，任何失败静默丢弃，绝不影响用户。
  *
+ * 上报前先查文件大小：> COLLECTOR_MAX_FILE_SIZE(20MB) 则改报一条极高音质直链
+ * (COLLECTOR_FALLBACK_LEVEL，按约定不超过 15MB)；降级失败就放弃这次上报，
+ * 不把超限的原文件丢给收集器。大小未知(接口没给、HEAD/Range 又拿不到)时按原样上报。
+ *
  * @param {string} fileUrl - 拿到的可播放直链
- * @param {{id: string, title: string, artist: string, cover: string}} track - 播放器页的 track(含补齐后的元数据)
+ * @param {{id: string, title: string, artist: string, cover: string, size?: number}} track - 播放器页的 track(含补齐后的元数据)
  */
 function reportToCollector(fileUrl, track) {
   if (!COLLECTOR_URL || COLLECTOR_URL.includes('YOUR_ACCOUNT')) return;
   if (!fileUrl || !/^https?:\/\//i.test(fileUrl)) return;
 
-  const payload = () => ({
+  const payload = (url) => ({
     title: (track.title || '').trim(),
     author: (track.artist || '').trim(),
     pic: track.cover || '',
-    url: fileUrl,
+    url,
     songmid: normalizeId(track.id), // 网易云歌曲 ID，沿用原识别字段 songmid，Worker 用它做额外去重
     lrc: '',                        // 本项目数据源不返回歌词，留空
     source: musicSource.id || musicSource.name || '',
@@ -473,36 +541,73 @@ function reportToCollector(fileUrl, track) {
   });
 
   // 前端去重：收集库已收录的歌不再上报（Worker 侧还会有一次检查）
-  const dedupe = payload();
+  const dedupe = payload(fileUrl);
   try {
     if (musicdbListLoaded && musicdbList.has(songStem({ title: dedupe.title, author: dedupe.author }))) return;
   } catch (_) { /* 去重失败不拦截上报 */ }
 
-  try {
-    const probe = new Audio();
-    probe.preload = 'metadata';
-    let done = false;
-    const cleanup = () => { try { probe.src = ''; probe.removeAttribute('src'); probe.load(); } catch (_) {} };
-    const timer = setTimeout(() => { if (!done) { done = true; cleanup(); } }, 20000);
-    probe.onloadedmetadata = () => {
-      if (done) return; done = true; clearTimeout(timer);
-      const dur = probe.duration;
-      cleanup();
-      if (!Number.isFinite(dur) || dur <= COLLECTOR_MIN_DURATION) return; // ≤60 秒不上报
-      const body = payload();
-      body.duration = Math.round(dur);
-      if (!body.title || !body.author || !body.url) return;
-      fetch(COLLECTOR_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        mode: 'cors',
-        keepalive: true,
-      }).catch(() => { /* 上报失败不打扰用户 */ });
-    };
-    probe.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); } };
-    probe.src = fileUrl;
-  } catch (_) { /* 忽略所有上报异常 */ }
+  // 对最终要上报的那条直链探时长、满足条件才 POST（原链与降级链共用这一套）
+  const startProbe = (urlToReport) => {
+    try {
+      const probe = new Audio();
+      probe.preload = 'metadata';
+      let done = false;
+      const cleanup = () => { try { probe.src = ''; probe.removeAttribute('src'); probe.load(); } catch (_) {} };
+      const timer = setTimeout(() => { if (!done) { done = true; cleanup(); } }, 20000);
+      probe.onloadedmetadata = () => {
+        if (done) return; done = true; clearTimeout(timer);
+        const dur = probe.duration;
+        cleanup();
+        if (!Number.isFinite(dur) || dur <= COLLECTOR_MIN_DURATION) return; // ≤60 秒不上报
+        const body = payload(urlToReport);
+        body.duration = Math.round(dur);
+        if (!body.title || !body.author || !body.url) return;
+        fetch(COLLECTOR_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          mode: 'cors',
+          keepalive: true,
+        }).catch(() => { /* 上报失败不打扰用户 */ });
+      };
+      probe.onerror = () => { if (!done) { done = true; clearTimeout(timer); cleanup(); } };
+      probe.src = urlToReport;
+    } catch (_) { /* 忽略所有上报异常 */ }
+  };
+
+  // 查大小 → 超限则换极高音质链 → 再探时长上报。全程后台进行，不阻塞播放。
+  (async () => {
+    let size = 0;
+    try {
+      // 接口返回的 size 优先：零成本、无 CORS 问题；缺失时才去探响应头
+      const backendSize = Number(track && track.size);
+      if (Number.isFinite(backendSize) && backendSize > 0) {
+        size = backendSize;
+      } else {
+        size = await getRemoteFileSize(fileUrl);
+      }
+    } catch (_) {
+      size = 0;
+    }
+
+    if (size <= COLLECTOR_MAX_FILE_SIZE) {
+      startProbe(fileUrl); // 未超限(含大小未知) → 原样上报
+      return;
+    }
+
+    // 超限 → 换一条极高音质直链上报
+    try {
+      const songId = normalizeId(track && track.id);
+      if (!songId) return;
+      // 当前播的已经是极高音质还超限：再请求一次也拿回同一文件，直接放弃，避免无意义请求
+      try {
+        if (getQuality() === COLLECTOR_FALLBACK_LEVEL) return;
+      } catch (_) {}
+      const fb = await musicSource.getTrackUrl(songId, COLLECTOR_FALLBACK_LEVEL);
+      if (!fb || !fb.url || !/^https?:\/\//i.test(fb.url) || fb.url === fileUrl) return;
+      startProbe(fb.url);
+    } catch (_) { /* 降级失败就放弃这次上报，不报超限原文件 */ }
+  })();
 }
 
 /**
@@ -1868,7 +1973,8 @@ async function loadTrack() {
     updatePlayerUI(track);
 
     // 上报收集器（移植自 QQMusicParser，只上报、不兜底播放）：
-    // 成功拿到可播放直链后，后台探测实际时长 > 60s 再上报，不阻塞播放、失败静默丢弃。
+    // 成功拿到可播放直链后，后台先查文件大小(>20MB 则改报极高音质链)、
+    // 再探测实际时长 > 60s 才上报，不阻塞播放、失败静默丢弃。
     reportToCollector(track.audioUrl, track);
   } catch (error) {
     console.error('获取歌曲信息失败:', error);
