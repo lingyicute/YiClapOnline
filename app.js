@@ -1901,16 +1901,83 @@ function formatSize(bytes) {
 }
 
 /**
+ * 正在进行中的下载任务管理（支持弹窗关闭后重新打开继续展示进度）
+ * key: url
+ * value: { percent: number, status: 'downloading'|'completed'|'error', listeners: Set<Function> }
+ */
+const downloadTasks = new Map();
+
+/**
  * 无感唤起下载：fetch 音频为 Blob 后通过 <a download> 在当前页触发下载，不打开新页面/新标签页。
  * 依赖音频 CDN 的 CORS（已确认返回 Access-Control-Allow-Origin: *）。
  * @param {string} url
  * @param {string} filename
+ * @param {Function} [onProgress] - 进度回调 (percent: number, status: string) => void
+ * @param {number} [expectedSize] - 预估文件字节大小，用于响应头缺失 Content-Length 时的兜底
  */
-async function seamlessDownload(url, filename) {
+async function seamlessDownload(url, filename, onProgress, expectedSize) {
+  let task = downloadTasks.get(url);
+  if (!task) {
+    task = { percent: 0, status: 'downloading', listeners: new Set() };
+    downloadTasks.set(url, task);
+  }
+  if (typeof onProgress === 'function') {
+    task.listeners.add(onProgress);
+  }
+
+  const notify = (percent, status) => {
+    task.percent = percent;
+    task.status = status;
+    task.listeners.forEach(fn => {
+      try { fn(percent, status); } catch {}
+    });
+  };
+
+  notify(0, 'downloading');
+
   try {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const blob = await resp.blob();
+
+    let total = 0;
+    const cl = resp.headers.get('content-length');
+    if (cl) {
+      const parsed = parseInt(cl, 10);
+      if (Number.isFinite(parsed) && parsed > 0) total = parsed;
+    }
+    if (!total && expectedSize) {
+      const parsed = Number(expectedSize);
+      if (Number.isFinite(parsed) && parsed > 0) total = parsed;
+    }
+
+    let blob;
+    if (resp.body && typeof resp.body.getReader === 'function') {
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let receivedLength = 0;
+      let lastPercent = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        receivedLength += value.length;
+
+        if (total > 0) {
+          const percent = Math.min(100, Math.floor((receivedLength / total) * 100));
+          if (percent !== lastPercent) {
+            lastPercent = percent;
+            notify(percent, 'downloading');
+          }
+        }
+      }
+      notify(100, 'downloading');
+      blob = new Blob(chunks);
+    } else {
+      blob = await resp.blob();
+      notify(100, 'downloading');
+    }
+
     const objUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objUrl;
@@ -1919,8 +1986,15 @@ async function seamlessDownload(url, filename) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
+
+    // 稍作停顿，让用户能看清 100% 进度
+    await new Promise(r => setTimeout(r, 400));
+    notify(100, 'completed');
+    setTimeout(() => downloadTasks.delete(url), 5000);
   } catch (e) {
     console.warn('下载失败（可能为跨域或网络限制）:', e);
+    notify(task.percent, 'error');
+    setTimeout(() => downloadTasks.delete(url), 5000);
   }
 }
 
@@ -1945,10 +2019,54 @@ function renderDownloadRow(list, item, safeTitle) {
   dlBtn.type = 'button';
   dlBtn.className = 'download-row-btn';
   dlBtn.textContent = '下载';
+
+  const applyStatus = (percent, status) => {
+    if (status === 'downloading') {
+      dlBtn.disabled = true;
+      dlBtn.classList.remove('download-success', 'download-error-btn');
+      dlBtn.classList.add('downloading');
+      dlBtn.textContent = `下载中...${percent}%`;
+    } else if (status === 'completed') {
+      dlBtn.classList.remove('downloading', 'download-error-btn');
+      dlBtn.classList.add('download-success');
+      dlBtn.textContent = '下载完成';
+      setTimeout(() => {
+        if (dlBtn && dlBtn.isConnected) {
+          dlBtn.disabled = false;
+          dlBtn.classList.remove('download-success');
+          dlBtn.textContent = '下载';
+        }
+      }, 3000);
+    } else if (status === 'error') {
+      dlBtn.classList.remove('downloading', 'download-success');
+      dlBtn.classList.add('download-error-btn');
+      dlBtn.textContent = '下载失败';
+      setTimeout(() => {
+        if (dlBtn && dlBtn.isConnected) {
+          dlBtn.disabled = false;
+          dlBtn.classList.remove('download-error-btn');
+          dlBtn.textContent = '下载';
+        }
+      }, 3000);
+    }
+  };
+
+  // 检查该音频直链是否已有进行中的下载任务（例如关闭弹窗后再次打开）
+  const ongoingTask = downloadTasks.get(item.url);
+  if (ongoingTask && ongoingTask.status === 'downloading') {
+    applyStatus(ongoingTask.percent, 'downloading');
+    ongoingTask.listeners.add(applyStatus);
+  }
+
   dlBtn.addEventListener('click', () => {
-    // 用直链后缀决定文件扩展名（无损类为 flac，标准/极高类为 mp3）
+    if (dlBtn.disabled) return;
+    // 点击后立即禁止再点击、改变颜色、显示初始进度 0%
+    dlBtn.disabled = true;
+    dlBtn.classList.add('downloading');
+    dlBtn.textContent = '下载中...0%';
+
     const ext = (item.url.split('?')[0].match(/\.(\w+)$/) || [, 'mp3'])[1];
-    seamlessDownload(item.url, `${safeTitle} (${item.label}).${ext}`);
+    seamlessDownload(item.url, `${safeTitle} (${item.label}).${ext}`, applyStatus, item.size);
   });
   row.appendChild(dlBtn);
 

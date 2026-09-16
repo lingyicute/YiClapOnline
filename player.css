@@ -983,7 +983,9 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .download-row-btn {
   flex-shrink: 0;
-  padding: 0.6rem 1.4rem;
+  min-width: 9.6rem;
+  text-align: center;
+  padding: 0.6rem 1rem;
   border: none;
   border-radius: var(--radius-pill);
   background: var(--primary);
@@ -991,11 +993,39 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   font-size: 1.3rem;
   font-family: inherit;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-.download-row-btn:hover {
+.download-row-btn:hover:not(:disabled) {
   opacity: 0.9;
+}
+
+.download-row-btn:disabled,
+.download-row-btn.downloading {
+  cursor: not-allowed;
+  background-color: #80868b;
+  color: #ffffff;
+  opacity: 0.85;
+}
+
+:root.dark-theme .download-row-btn:disabled,
+:root.dark-theme .download-row-btn.downloading {
+  background-color: #5f6368;
+  color: #e8eaed;
+}
+
+.download-row-btn.download-success {
+  background-color: #34a853;
+  color: #ffffff;
+  cursor: default;
+  opacity: 1;
+}
+
+.download-row-btn.download-error-btn {
+  background-color: #ea4335;
+  color: #ffffff;
+  cursor: default;
+  opacity: 1;
 }
 
 .download-more-btn {
