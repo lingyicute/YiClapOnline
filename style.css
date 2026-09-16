@@ -281,6 +281,9 @@ main {
   background-color: rgba(100, 181, 246, 0.1);
 }
 
+.results-header span:last-child {
+  text-align: right;
+}
 .results-list {
   overflow-y: visible;
   width: 100%;
