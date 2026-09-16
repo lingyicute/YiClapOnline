@@ -1,0 +1,106 @@
+name: WebKit E2E 测试
+
+# 每次提交 / PR 到默认分支时自动用真实 WebKit（Playwright 自带构建，与
+# Safari 同源的 WebKit 内核）跑端到端测试，断言与 Firefox 版一一对应。
+# 测试报告与逐步截图会上传为 Artifacts（即使失败也会保留，便于排查）。
+#
+# 为什么不用 Selenium？Selenium 只能驱动 macOS 上的 Safari，Linux CI 上
+# 没有 WebKit driver；Playwright 的 WebKit 构建可在 ubuntu 上 headless 运行。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      skip_network_tests:
+        description: '跳过依赖在线音乐 API 的用例（冒烟模式: true/false）'
+        required: false
+        default: 'false'
+
+# 同一分支上新提交到达时，取消还在跑的旧任务
+concurrency:
+  group: webkit-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  webkit-e2e:
+    name: WebKit E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tests/requirements-webkit.txt
+
+      - name: 安装 Playwright
+        run: pip install -r tests/requirements-webkit.txt
+
+      # 安装 WebKit 浏览器本体 + 系统依赖（含 GStreamer 媒体栈，否则
+      # <audio> 无法解码播放）。--with-deps 会用 sudo 装 apt 包。
+      - name: 安装 WebKit 浏览器（含系统依赖）
+        run: python3 -m playwright install --with-deps webkit
+
+      - name: 确认 WebKit 版本
+        run: python3 -m playwright --version
+
+      # 无头容器没有声卡：给 ALSA 配一个空输出设备作为 GStreamer 音频槽，
+      # 否则 WebKit 的 <audio>  CurrentTime 可能停滞。注意 null 设备不是
+      # 实时阻塞的，播放时钟会快于实时——测试断言已兼容快/慢两种时钟。
+      - name: 配置虚拟声卡（ALSA null device）
+        run: printf 'pcm.!default {\n  type null\n}\n' > ~/.asoundrc
+
+      - name: 启动静态站点
+        run: |
+          nohup python3 -m http.server 8000 --bind 127.0.0.1 --directory . > site.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:8000/index.html > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "::error::站点启动超时"
+          exit 1
+
+      - name: 运行 WebKit 测试
+        env:
+          BASE_URL: http://127.0.0.1:8000
+          OUT_DIR: test-results
+          HEADLESS: '1'
+          SKIP_NETWORK_TESTS: ${{ github.event.inputs.skip_network_tests == 'true' && '1' || '0' }}
+        run: python3 tests/e2e_webkit.py
+
+      - name: 上传测试报告与截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-e2e
+          path: test-results/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 在 Summary 中展示结果
+        if: always()
+        run: |
+          echo "## WebKit E2E" >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f test-results/report.json ]; then
+            echo '| 测试项 | 结果 | 说明 |' >> "$GITHUB_STEP_SUMMARY"
+            echo '| --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
+            python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r = json.load(open('test-results/report.json', encoding='utf-8'))
+          for item in r['results']:
+              mark = '🟡SKIP' if item.get('skipped') else ('✅PASS' if item['ok'] else '❌FAIL')
+              detail = str(item['detail']).replace('|', '\\|')[:300].replace('\n', '<br>')
+              print(f"| {item['test']} | {mark} | {detail} |")
+          EOF
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo "- 通过: $(python3 -c "import json;print(json.load(open('test-results/report.json',encoding='utf-8'))['pass'])")，失败: $(python3 -c "import json;print(json.load(open('test-results/report.json',encoding='utf-8'))['fail'])")" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '未生成 report.json（测试进程可能提前崩溃）' >> "$GITHUB_STEP_SUMMARY"
+          fi
