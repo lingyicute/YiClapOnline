@@ -492,20 +492,21 @@ async function getRemoteFileSize(url) {
     const timer = setTimeout(() => ctrl.abort(), 8000);
     try {
       const res = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal: ctrl.signal });
+      let found = 0;
       if (res.ok || res.status === 206) {
         const m = /\/(\d+)\s*$/.exec(res.headers.get('content-range') || '');
-        if (m) {
-          const size = parsePositiveInt(m[1]);
-          if (size > 0) return size;
-        }
+        if (m) found = parsePositiveInt(m[1]);
         // 服务端若无视 Range 会返回 200 + 完整 Content-Length；此时它就是文件大小。
         // (命中 Range 时这里是 1，必须排除，否则会误判成 1 字节)
-        if (res.status === 200) {
-          const size = parsePositiveInt(res.headers.get('content-length'));
-          if (size > 1) return size;
+        if (!found && res.status === 200) {
+          const full = parsePositiveInt(res.headers.get('content-length'));
+          if (full > 1) found = full;
         }
       }
+      // 读完头就立刻取消 body 再返回：Range 被无视时会返回 200 + 整个文件，
+      // 不取消的话这几十 MB 会在后台白白下载一段才被 GC 掐掉
       try { if (res.body && typeof res.body.cancel === 'function') await res.body.cancel(); } catch (_) {}
+      if (found > 0) return found;
     } finally {
       clearTimeout(timer);
     }
