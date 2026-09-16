@@ -98,6 +98,44 @@ def poll_until(fn, timeout=30, interval=1.0):
         time.sleep(interval)
 
 
+def open_playable_song(limit=8):
+    """从当前结果列表里找到一首 loadTrack 成功的歌并停留在播放器 iframe 内。
+
+    上游接口按账号/音质轮换，个别歌曲在部分音质下会 404（表现为
+    播放器显示「获取歌曲失败」），把测试钉死在某一首歌上并不稳定，
+    真实用户的正常行为也是换一首。
+    返回该歌曲的元数据 dict；均失败时返回 None（并回到主页文档上下文）。
+    """
+    cands = b.execute_script(f"""
+      return [...document.querySelectorAll('#results-list .result-item .play-button')]
+        .slice(0, {limit}).map(x=>({{id:x.dataset.songId, title:x.dataset.title,
+        artist:x.dataset.artist, vip:x.dataset.vip, cover:x.dataset.cover}}))""")
+    b.switch_to.default_content()
+    for cand in cands:
+        b.execute_script(
+            "document.querySelector('.play-button[data-song-id=\"%s\"]').click()" % cand["id"])
+        wait.until(lambda d: d.execute_script(
+            "return document.getElementById('player-container').classList.contains('active')"))
+        src = b.execute_script("return document.getElementById('player-frame').src")
+        b.switch_to.frame(b.find_element(By.ID, "player-frame"))
+        try:
+            wait.until(lambda d: d.execute_script(
+                "var o=document.getElementById('loadingOverlay');"
+                "return !o || o.classList.contains('hidden')"))
+        except Exception:
+            pass
+        title = b.execute_script(
+            "var t=document.querySelector('[data-title]'); return t ? t.textContent : ''")
+        if '获取歌曲失败' not in title and '播放失败' not in title:
+            cand["_src"] = src
+            return cand
+        b.switch_to.default_content()
+        b.find_element(By.ID, "close-player").click()
+        time.sleep(0.6)
+    b.switch_to.default_content()
+    return None
+
+
 # ================= 1. 主页加载 + 首访音质弹窗 =================
 @step("主页模块")
 def _():
@@ -153,28 +191,25 @@ def _():
 @step("播放模块")
 @net
 def _():
-    first = b.execute_script("""var x=document.querySelector('#results-list .result-item .play-button');
-        if(!x) return null; var d={id:x.dataset.songId,title:x.dataset.title,artist:x.dataset.artist,vip:x.dataset.vip};
-        x.click(); return d;""")
-    wait.until(lambda d: d.execute_script(
-        "return document.getElementById('player-container').classList.contains('active')"))
-    rec("点击播放后播放器打开", bool(first), json.dumps(first, ensure_ascii=False))
-    src = b.execute_script("return document.getElementById('player-frame').src")
+    first = open_playable_song()
+    rec("从结果中找到可播放歌曲（接口按账号/音质轮换，钉死一首歌不稳定）",
+        bool(first), json.dumps(first, ensure_ascii=False) if first else "前几首尝试均失败")
+    if not first:
+        raise Exception("搜索前若干首全部 404/不可用，疑似上游接口或网络环境整体异常")
+    # 此时已位于播放器 iframe 内
+    src = first["_src"]
     rec("播放器 iframe 指向 player.html", "player.html" in src, src[:120])
-
-    b.switch_to.frame(b.find_element(By.ID, "player-frame"))
-    wait.until(lambda d: d.execute_script(
-        "var o=document.getElementById('loadingOverlay'); return !o || o.classList.contains('hidden');"))
     t = b.execute_script("return document.querySelector('[data-title]')?.textContent")
     a = b.execute_script("return document.querySelector('[data-artist]')?.textContent")
     vip_b = b.execute_script("var x=document.querySelector('[data-vip-banner]'); return x && !x.hidden")
-    rec("播放器加载元数据", bool(t), f"标题={t} / 歌手={a}")
+    rec("播放器加载元数据且无错误", bool(t) and "失败" not in t, f"标题={t} / 歌手={a}")
     rec("VIP 解析横幅显示", bool(vip_b) if first and first.get("vip") == "1" else True, f"vip_banner={vip_b}")
 
-    cover = poll_until(lambda: b.execute_script(
-        "var c=document.querySelector('[data-player-banner]')?.src||'';"
-        "return (c && c.indexOf('none.webp')<0) ? c : false"), timeout=15) or ""
-    rec("封面异步换为歌曲封面", cover.startswith("http"), cover[:100])
+    if first.get("cover"):
+        cover = poll_until(lambda: b.execute_script(
+            "var c=document.querySelector('[data-player-banner]')?.src||'';"
+            "return (c && c.indexOf('none.webp')<0) ? c : false"), timeout=15) or ""
+        rec("封面异步换为歌曲封面", cover.startswith("http"), cover[:100])
 
     auto = b.execute_script("return document.querySelector('[data-play-btn]').classList.contains('active')")
     rec("播放器默认不自动播放（等待用户操作）", not auto, f"active={auto}")
@@ -337,12 +372,10 @@ def _():
         b.find_element(By.ID, "search-input").send_keys(Keys.ENTER)
         poll_until(lambda: b.execute_script(
             "return document.querySelectorAll('#results-list .result-item').length>0"), timeout=30)
-    b.execute_script("document.querySelector('#results-list .result-item .play-button').click()")
-    wait.until(lambda d: d.execute_script(
-        "return document.getElementById('player-container').classList.contains('active')"))
-    b.switch_to.frame(b.find_element(By.ID, "player-frame"))
-    wait.until(lambda d: d.execute_script(
-        "var o=document.getElementById('loadingOverlay'); return !o || o.classList.contains('hidden');"))
+    song = open_playable_song()
+    rec("找到可播放歌曲（用于暂停/下载断言）", bool(song), json.dumps(song, ensure_ascii=False) if song else "前几首尝试均失败")
+    if not song:
+        raise Exception("无可播放歌曲，暂停/下载断言无法进行")
     time.sleep(1.0)
     b.find_element(By.CSS_SELECTOR, "[data-play-btn]").click()
     playing = poll_until(lambda: b.execute_script(
