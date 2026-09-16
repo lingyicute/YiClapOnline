@@ -387,7 +387,7 @@ const musicSource = {
    ==========================================================================
    * 逻辑：成功拿到歌曲文件直链 → 后台探测实际时长 > 60 秒 → 上报收集器。
    * 上报内容：歌曲直链 url、歌名 title、歌手 author、封面 pic、歌词 lrc、
-             平台内歌曲 ID(网易云) 与数据源标识 source，以及探测到的时长。
+             平台内歌曲 ID(网易云，沿用字段名 songmid) 与数据源标识 source，以及探测到的时长。
    * 去重：Worker 端按 url / title-author / id 检查；前端另有 musicdb 的已收集
           集合去重。
    * 上报入口在播放器的 loadTrack()：只有拿到可播放直链才走到这里，主页不触发。
@@ -466,7 +466,7 @@ function reportToCollector(fileUrl, track) {
     author: (track.artist || '').trim(),
     pic: track.cover || '',
     url: fileUrl,
-    id: normalizeId(track.id),      // 网易云歌曲 ID，Worker 用它做额外去重
+    songmid: normalizeId(track.id), // 网易云歌曲 ID，沿用原识别字段 songmid，Worker 用它做额外去重
     lrc: '',                        // 本项目数据源不返回歌词，留空
     source: musicSource.id || musicSource.name || '',
     duration: 0,
