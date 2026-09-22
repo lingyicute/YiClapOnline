@@ -5,7 +5,7 @@
  *
  * 更新检测就是拿它和线上 update.json 比：不一致 => 用户跑的是旧代码 => 提示刷新。
  */
-const APP_VERSION = '202609232401';
+const APP_VERSION = '202609232402';
 
 /**
  * YiClapOnline —— 主页(index.html)与播放器(player.html)共用的唯一脚本。
@@ -1916,15 +1916,22 @@ function updatePlayerUI(track) {
   if (playerBanner && track.cover) {
     loadImageWithFade(playerBanner, track.cover, () => {
       playerBanner.setAttribute('alt', `${title} 专辑封面`);
-      // 用 CSS 变量 + has-cover 类实现 800ms 淡入，避免纯黑/白闪切
-      // 兼容旧版本可能写在 background-image 上的值，统一清掉，只走 ::before
-      document.body.style.backgroundImage = 'none';
-      document.body.style.setProperty('--cover-url', cssUrl(track.cover));
-      requestAnimationFrame(() => {
+      // 磨砂背景 - 居中裁切，不平铺，800ms 淡入
+      const bgCover = document.getElementById('bgCover');
+      if (bgCover) {
+        bgCover.style.backgroundImage = cssUrl(track.cover);
         requestAnimationFrame(() => {
-          document.body.classList.add('has-cover');
+          requestAnimationFrame(() => {
+            bgCover.classList.add('has-cover');
+          });
         });
-      });
+      } else {
+        // 兜底：旧版本没有 bgCover 元素时仍走 body 变量
+        document.body.style.setProperty('--cover-url', cssUrl(track.cover));
+        document.body.classList.add('has-cover');
+      }
+      // 清理旧的 body backgroundImage，避免双重背景
+      document.body.style.backgroundImage = 'none';
     });
   }
 
