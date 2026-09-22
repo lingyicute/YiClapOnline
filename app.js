@@ -5,7 +5,7 @@
  *
  * 更新检测就是拿它和线上 update.json 比：不一致 => 用户跑的是旧代码 => 提示刷新。
  */
-const APP_VERSION = '202609222406';
+const APP_VERSION = '202609222407';
 
 /**
  * YiClapOnline —— 主页(index.html)与播放器(player.html)共用的唯一脚本。
