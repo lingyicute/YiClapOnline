@@ -1916,8 +1916,15 @@ function updatePlayerUI(track) {
   if (playerBanner && track.cover) {
     loadImageWithFade(playerBanner, track.cover, () => {
       playerBanner.setAttribute('alt', `${title} 专辑封面`);
-      // 图片确认能加载再拿去做背景，避免背景先闪一下 broken 图
-      document.body.style.backgroundImage = cssUrl(track.cover);
+      // 用 CSS 变量 + has-cover 类实现 800ms 淡入，避免纯黑/白闪切
+      // 兼容旧版本可能写在 background-image 上的值，统一清掉，只走 ::before
+      document.body.style.backgroundImage = 'none';
+      document.body.style.setProperty('--cover-url', cssUrl(track.cover));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          document.body.classList.add('has-cover');
+        });
+      });
     });
   }
 
