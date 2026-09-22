@@ -190,7 +190,7 @@ body::before {
   background-image: var(--cover-url);
   background-size: cover;
   background-repeat: no-repeat;
-  background-position: center;
+  background-position: center center;
   opacity: 0;
   transition: opacity 800ms ease, background-color 800ms ease;
   pointer-events: none;
@@ -255,6 +255,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center center;
   transition: opacity 0.3s ease;
 }
 
@@ -286,6 +287,9 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 .player {
   --padding: 24px;
   background-image: var(--gradient);
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
   padding: var(--padding);
   min-height: 100vh;
   height: 100vh;
@@ -335,7 +339,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .music-banner-container {
   display: flex;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
   flex-grow: 1;
   width: 100%;
@@ -349,8 +353,8 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   height: auto;
   max-width: min(100%, 70vh);
   max-height: min(50vh, 70vw);
-  margin-inline: 0;
-  align-self: flex-start;
+  margin-inline: auto;
+  align-self: center;
   overflow: hidden;
   border-radius: var(--radius-24);
 }
