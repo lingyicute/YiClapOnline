@@ -337,7 +337,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .music-banner-container {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   flex-grow: 1;
   width: 100%;
@@ -351,8 +351,8 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   height: auto;
   max-width: min(100%, 70vh);
   max-height: min(50vh, 70vw);
-  margin-inline: auto;
-  align-self: center;
+  margin-inline: 0;
+  align-self: flex-start;
   overflow: hidden;
   border-radius: var(--radius-24);
 }
