@@ -178,16 +178,13 @@ body {
   min-height: 100vh;
   min-width: 250px;
   overflow: auto;
-  --cover-url: none;
 }
 
-body::before {
-  content: "";
+.bg-cover {
   position: fixed;
   inset: 0;
   z-index: 0;
   background-color: var(--black);
-  background-image: var(--cover-url);
   background-size: cover;
   background-repeat: no-repeat;
   background-position: center center;
@@ -196,7 +193,7 @@ body::before {
   pointer-events: none;
 }
 
-body.has-cover::before {
+.bg-cover.has-cover {
   opacity: 1;
 }
 
