@@ -405,7 +405,8 @@ const musicSource = {
       audioUrl: data.url,
       size: data.size || 0,
       br: data.br || 0,
-      level,
+      // 接口会把不可用的高档位降级成实际存在的档位，以返回值为准
+      level: typeof data.level === 'string' && data.level ? data.level : level,
     };
   },
 
@@ -413,14 +414,21 @@ const musicSource = {
    * 按 ID + 指定音质换取音频直链与大小（用于下载弹窗逐档解析）。
    * @param {string} id
    * @param {string} level - 见 QUALITY_LEVELS
-   * @returns {Promise<{url: string, size: number, br: number}>}
+   * @returns {Promise<{url: string, size: number, br: number, level: string}>}
+   *          level 是接口实际返回的音质：请求的档位不存在时接口会降级成较低档位
+   *          (例如请求 hires 却返回 lossless 的同一个文件)，调用方据此识别重复档位
    */
   async getTrackUrl(id, level) {
     const data = await this._request('getSongUrl', { id, level });
     if (!data || typeof data.url !== 'string' || !/^https?:\/\//i.test(data.url)) {
       throw new Error('该音质暂不可用');
     }
-    return { url: data.url, size: data.size || 0, br: data.br || 0 };
+    return {
+      url: data.url,
+      size: data.size || 0,
+      br: data.br || 0,
+      level: typeof data.level === 'string' && data.level ? data.level : level,
+    };
   }
 };
 
@@ -2465,6 +2473,9 @@ async function openDownloadModal() {
   const stale = () => seq !== downloadModalSeq;
   const cleanups = [];
   const registerCleanup = fn => cleanups.push(fn);
+  // 已展示过的实际音质：接口对不存在的档位会降级返回较低档位的文件，
+  // 若照单全收，同一个文件会以不同标签(如 Hi-Res / 无损)重复出现
+  const shownLevels = new Set();
 
   const safeTitle = sanitizeStem(currentSong.title || 'music');
   list.innerHTML = '<div class="download-loading">正在解析标准音质…</div>';
@@ -2489,6 +2500,7 @@ async function openDownloadModal() {
     const std = await musicSource.getTrackUrl(currentSong.id, 'standard');
     if (stale()) return;
     list.querySelector('.download-loading')?.remove();
+    shownLevels.add(std.level);
     renderDownloadRow(list, { label: '标准音质', url: std.url, size: std.size }, safeTitle, { registerCleanup });
   } catch (e) {
     if (stale()) return;
@@ -2504,6 +2516,18 @@ async function openDownloadModal() {
   moreBtn.type = 'button';
   moreBtn.className = 'download-more-btn';
   moreBtn.textContent = '继续解析 VIP 和 SVIP 音质';
+  const appendUnavailableRow = (labelText, reason) => {
+    const row = document.createElement('div');
+    row.className = 'download-row download-row--error';
+    const label = document.createElement('span');
+    label.className = 'download-label';
+    label.textContent = labelText;
+    const warn = document.createElement('span');
+    warn.className = 'download-warn';
+    warn.textContent = reason;
+    row.append(label, warn);
+    list.insertBefore(row, moreBtn);
+  };
   moreBtn.addEventListener('click', async () => {
     moreBtn.disabled = true;
     moreBtn.textContent = '正在解析更高音质…';
@@ -2511,22 +2535,20 @@ async function openDownloadModal() {
       try {
         const r = await musicSource.getTrackUrl(currentSong.id, q.level);
         if (stale()) return;
-        renderDownloadRow(list, { label: q.label, url: r.url, size: r.size }, safeTitle, {
+        if (shownLevels.has(r.level)) {
+          appendUnavailableRow(q.label, '该歌曲暂无此音质');
+          continue;
+        }
+        shownLevels.add(r.level);
+        // 标签按实际返回的音质写，避免文件名/标签与内容不符
+        const actual = QUALITY_LEVELS.find(item => item.level === r.level) || q;
+        renderDownloadRow(list, { label: actual.label, url: r.url, size: r.size }, safeTitle, {
           before: moreBtn,
           registerCleanup,
         });
       } catch {
         if (stale()) return;
-        const row = document.createElement('div');
-        row.className = 'download-row download-row--error';
-        const label = document.createElement('span');
-        label.className = 'download-label';
-        label.textContent = q.label;
-        const warn = document.createElement('span');
-        warn.className = 'download-warn';
-        warn.textContent = '解析失败';
-        row.append(label, warn);
-        list.insertBefore(row, moreBtn);
+        appendUnavailableRow(q.label, '解析失败');
       }
     }
     moreBtn.remove();
