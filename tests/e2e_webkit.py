@@ -417,7 +417,7 @@ def _():
         timeout=WAIT_MS)
     items = poll_until(lambda: fr.evaluate(
         "() => { var l=document.getElementById('downloadList');"
-        " return l && l.children.length>0 ? l.children.length : false; }"), timeout=15)
+        " return l ? l.querySelectorAll('.download-row, .download-error').length : false; }"), timeout=15)
     shot("10-download-modal.png")
     rec("下载弹窗打开并逐档解析", bool(items), f"解析项数={items}")
 
@@ -442,11 +442,13 @@ def _():
 @step("player直接访问容错")
 def _():
     page.goto(BASE + "/player.html")
-    time.sleep(4)
-    text = page.evaluate(
-        "() => document.querySelector('.loading-text')?.textContent || document.body.innerText")
+    hidden = poll_until(lambda: page.evaluate(
+        "() => { var o=document.getElementById('loadingOverlay'); return !o || o.classList.contains('hidden'); }"), timeout=15)
+    title = page.evaluate("() => document.querySelector('[data-title]')?.textContent || ''")
+    artist = page.evaluate("() => document.querySelector('[data-artist]')?.textContent || ''")
     shot("09-player-direct.png")
-    rec("直接访问 player.html 有友好提示（不卡死）", len(text.strip()) > 0, text.strip()[:120])
+    rec("直接访问 player.html 有友好提示（不卡死）",
+        bool(hidden) and ("未提供歌曲" in title or "未提供歌曲" in artist), f"hidden={hidden} {title} / {artist}")
 
 
 try:

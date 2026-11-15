@@ -391,7 +391,7 @@ def _():
     wait.until(lambda d: d.execute_script(
         "return document.getElementById('downloadModal').classList.contains('active')"))
     items = poll_until(lambda: b.execute_script(
-        "var l=document.getElementById('downloadList'); return l && l.children.length>0 ? l.children.length : false"), timeout=15)
+        "var l=document.getElementById('downloadList'); return l ? l.querySelectorAll('.download-row, .download-error').length : false"), timeout=15)
     shot(b, "10-download-modal.png")
     rec("下载弹窗打开并逐档解析", bool(items), f"解析项数={items}")
     b.switch_to.default_content()
@@ -418,10 +418,13 @@ def _():
 def _():
     b.switch_to.default_content()
     b.get(BASE + "/player.html")
-    time.sleep(4)
-    text = b.execute_script("return document.querySelector('.loading-text')?.textContent || document.body.innerText")
+    hidden = poll_until(lambda: b.execute_script(
+        "var o=document.getElementById('loadingOverlay'); return !o || o.classList.contains('hidden')"), timeout=15)
+    title = b.execute_script("return document.querySelector('[data-title]')?.textContent || ''")
+    artist = b.execute_script("return document.querySelector('[data-artist]')?.textContent || ''")
     shot(b, "09-player-direct.png")
-    rec("直接访问 player.html 有友好提示（不卡死）", len(text.strip()) > 0, text.strip()[:120])
+    rec("直接访问 player.html 有友好提示（不卡死）",
+        bool(hidden) and ("未提供歌曲" in title or "未提供歌曲" in artist), f"hidden={hidden} {title} / {artist}")
 
 
 try:
