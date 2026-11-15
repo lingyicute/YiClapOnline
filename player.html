@@ -20,7 +20,6 @@
     }
     .material-symbols-rounded {
       font-family: 'Material Symbols Rounded';
-      font-display: block;
       font-weight: normal;
       font-style: normal;
       font-size: 24px;
@@ -102,6 +101,7 @@
         document.documentElement.classList.add(localStorage.getItem('yiclape:darkmode') === '1' ? 'dark-theme' : 'light-theme');
       } catch (e) { }
 
+      window.__playerCssReady = false;
       var booted = false;
       function boot(version) {
         if (booted) return;
@@ -111,6 +111,16 @@
         var css = document.createElement('link');
         css.rel = 'stylesheet';
         css.href = './player.css' + q;
+        var onCssSettled = function () {
+          if (window.__playerCssReady) return;
+          window.__playerCssReady = true;
+          if (typeof window.__onPlayerCssReady === 'function') {
+            var cb = window.__onPlayerCssReady;
+            window.__onPlayerCssReady = null;
+            cb();
+          }
+        };
+        css.onload = css.onerror = onCssSettled;
         document.head.appendChild(css);
 
         var js = document.createElement('script');

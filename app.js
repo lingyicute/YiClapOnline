@@ -1713,10 +1713,15 @@ function updateFavoriteButtonUI(isFav) {
 }
 
 /**
- * 收起加载层
+ * 收起加载层（若 player.css 仍在异步加载，等其就绪后再收起，避免无样式闪烁）
  */
 function hidePlayerLoading() {
-  document.getElementById('loadingOverlay')?.classList.add('hidden');
+  const hide = () => document.getElementById('loadingOverlay')?.classList.add('hidden');
+  if (window.__playerCssReady === false) {
+    window.__onPlayerCssReady = hide;
+    return;
+  }
+  hide();
 }
 
 /**
