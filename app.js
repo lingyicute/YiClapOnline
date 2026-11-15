@@ -1317,8 +1317,26 @@ const UPDATE_DISMISSED_KEY = 'yiclape:update-dismissed';   // sessionStorage，�
  */
 const CHANGELOG_SEEN_KEY = 'yiclape:changelog-seen';
 
+/**
+ * 更新弹窗与音质弹窗长得一样、层级也一样，同时打开会叠在一起(升级后首次打开、
+ * 又没选过音质的老用户就会遇到)。所以同一时刻只开一个，后到的等前一个关掉再说。
+ */
+function isModalActive(id) {
+  return !!document.getElementById(id)?.classList.contains('active');
+}
+
 const updateControl = {
   _checking: false,
+
+  /** 更新提示被音质弹窗挡下过：音质弹窗关闭后要补上 */
+  _deferred: false,
+
+  /** 音质弹窗关闭时调用：补显示被它挡下的更新日志 / 刷新提示 */
+  resumeDeferred() {
+    if (!this._deferred) return;
+    this._deferred = false;
+    this.showChangelogIfUpgraded().finally(() => this.checkForUpdate());
+  },
 
   /**
    * 拉取线上版本信息。
@@ -1393,6 +1411,10 @@ const updateControl = {
     const refreshButton = document.getElementById('refreshButton');
     if (!modal || !overlay || !updateTime || !updateList || !refreshButton) return;
     if (modal.classList.contains('active')) return; // 已经在显示了
+    if (isModalActive('qualityModal')) {             // 音质弹窗开着：不叠在一起，关掉后再补
+      this._deferred = true;
+      return;
+    }
 
     const isChangelog = mode === 'changelog';
     if (title) title.textContent = isChangelog ? '更新内容' : '发现新版本';
@@ -1492,6 +1514,7 @@ function openQualityModal() {
   const list = document.getElementById('qualityList');
   if (!modal || !overlay || !list) return;
   if (modal.classList.contains('active')) return;
+  if (isModalActive('updateModal')) return; // 更新弹窗开着时不叠加，见 isModalActive
 
   list.innerHTML = '';
   let selected = getQuality();
@@ -1528,6 +1551,7 @@ function openQualityModal() {
     overlay.classList.remove('active');
     modal.classList.remove('active');
     document.removeEventListener('keydown', onKeydown);
+    updateControl.resumeDeferred();
   };
   const onKeydown = e => { if (e.key === 'Escape') close(); };
   confirmBtn.onclick = close;
