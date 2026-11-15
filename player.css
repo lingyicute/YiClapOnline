@@ -852,6 +852,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 .loading-overlay.hidden {
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
 }
 
 .loading-spinner {

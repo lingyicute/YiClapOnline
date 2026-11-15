@@ -70,6 +70,7 @@
     .loading-overlay.hidden {
       opacity: 0;
       visibility: hidden;
+      pointer-events: none;
     }
 
     .loading-spinner {
@@ -127,7 +128,17 @@
         js.src = './app.js' + q;
         js.onerror = function () {
           var showError = function () {
+            var overlay = document.getElementById('loadingOverlay');
+            var spinner = document.querySelector('.loading-spinner');
             var text = document.querySelector('.loading-text');
+            if (overlay) {
+              overlay.setAttribute('role', 'alert');
+              overlay.removeAttribute('aria-live');
+            }
+            if (spinner) {
+              spinner.hidden = true;
+              spinner.style.display = 'none';
+            }
             if (text) text.textContent = '播放器脚本加载失败，请检查网络后重试';
           };
           if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showError, { once: true });

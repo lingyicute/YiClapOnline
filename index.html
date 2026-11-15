@@ -40,7 +40,7 @@
     html { background-color: #f9f9f9; font-family: sans-serif; } /* style.css 到达后会被 Nebulove 覆盖 */
     html.dark-theme { background-color: #121212; }
     .main-loading-overlay {
-      position: fixed; inset: 0; z-index: 10000;
+      position: fixed; inset: 0; z-index: 10001;
       display: flex; align-items: center; justify-content: center;
       background-color: #f9f9f9; opacity: 1;
       transition: opacity 0.5s ease-out;
@@ -48,6 +48,7 @@
     html.dark-theme .main-loading-overlay { background-color: #121212; }
     .main-loading-overlay img { width: 60px; }
     .main-loading-overlay .boot-error { font-size: 15px; line-height: 1.6; color: #c62828; text-align: center; padding: 0 24px; }
+    html.dark-theme .main-loading-overlay .boot-error { color: #ff8a80; }
 
     /*
      * 默认隐藏的元素也必须在这里内联：
@@ -103,7 +104,7 @@
           var wait = Math.max(0, 300 - (Date.now() - start));
           setTimeout(hideOverlay, wait);
         };
-        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', finish);
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', finish, { once: true });
         else finish();
       }
 
@@ -113,14 +114,16 @@
         hidden = true;
         var overlay = document.getElementById('main-loading-overlay');
         if (!overlay) return;
+        overlay.style.pointerEvents = 'none';
         overlay.style.opacity = '0';
+        var removeTimer = setTimeout(function () { overlay.remove(); }, 600);
         var onEnd = function (e) {
           if (e.target !== overlay || e.propertyName !== 'opacity') return;
+          clearTimeout(removeTimer);
           overlay.removeEventListener('transitionend', onEnd);
           overlay.remove();
         };
         overlay.addEventListener('transitionend', onEnd);
-        setTimeout(function () { overlay.remove(); }, 600);
       }
 
       function showBootError() {
