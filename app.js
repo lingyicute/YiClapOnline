@@ -307,8 +307,11 @@ const musicSource = {
         let data;
         try {
           data = await res.json();
-        } catch {
-          throw Object.assign(new Error('接口返回的数据无法解析，请稍后重试'), { retryable: true });
+        } catch (err) {
+          const msg = err?.name === 'AbortError'
+            ? '请求超时，请稍后重试'
+            : '接口返回的数据无法解析，请稍后重试';
+          throw Object.assign(new Error(msg), { retryable: true });
         }
         if (!data || data.code !== 200) {
           // 业务码 404（账号轮换）可重试；其它业务错误视为明确错误，不再重试
@@ -352,10 +355,7 @@ const musicSource = {
       if (!song) continue;
       const id = normalizeId(song.id);
       if (!id) continue;
-      // 网易云封面 CDN 原样支持 HTTPS，升级协议避免 HTTPS 部署下的混合内容拦截
-      const cover = typeof song.picimg === 'string'
-        ? song.picimg.replace(/^http:\/\/(p\d+\.music\.126\.net\/)/i, 'https://$1')
-        : '';
+      const cover = normalizeCoverUrl(song.picimg);
       items.push({
         id,
         title: song.name || '未知歌曲',
@@ -379,11 +379,14 @@ const musicSource = {
    * @throws {Error} 歌曲不存在、无版权、或音频地址换取失败
    */
   async getTrack(id) {
+    const level = getQuality();
     const data = await this._request('getSongUrl', {
       id,
-      level: getQuality(),
+      level,
     });
-    if (!data || !data.url) throw new Error('该歌曲暂时无法播放');
+    if (!data || typeof data.url !== 'string' || !/^https?:\/\//i.test(data.url)) {
+      throw new Error('该歌曲暂时无法播放');
+    }
     return {
       id,
       title: '',
@@ -392,6 +395,7 @@ const musicSource = {
       audioUrl: data.url,
       size: data.size || 0,
       br: data.br || 0,
+      level,
     };
   },
 
@@ -403,7 +407,9 @@ const musicSource = {
    */
   async getTrackUrl(id, level) {
     const data = await this._request('getSongUrl', { id, level });
-    if (!data || !data.url) throw new Error('该音质暂不可用');
+    if (!data || typeof data.url !== 'string' || !/^https?:\/\//i.test(data.url)) {
+      throw new Error('该音质暂不可用');
+    }
     return { url: data.url, size: data.size || 0, br: data.br || 0 };
   }
 };
@@ -439,6 +445,17 @@ let musicdbListLoaded = false;  // list.txt 是否拉取成功
  */
 function normalizeId(value) {
   return value === undefined || value === null ? '' : String(value);
+}
+
+/**
+ * 校验并规范化封面地址：仅允许 http(s) 协议，并将网易云封面 CDN 的 http 升级为 https，
+ * 避免历史收藏或 URL 参数触发混合内容拦截及非法协议注入。
+ */
+function normalizeCoverUrl(url) {
+  if (typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return '';
+  return trimmed.replace(/^http:\/\/(p\d+\.music\.126\.net\/)/i, 'https://$1');
 }
 
 /* 与收集器后端的 sanitizeName 完全一致的清洗函数，保证算出的 stem 与 list.txt / 文件夹名一致 */
@@ -681,7 +698,7 @@ const favorites = {
           title: typeof item.title === 'string' ? item.title : '',
           artist: typeof item.artist === 'string' ? item.artist : '',
           vip: item.vip === true,
-          cover: typeof item.cover === 'string' ? item.cover : '',
+          cover: normalizeCoverUrl(item.cover),
         });
       }
       return items;
@@ -728,7 +745,7 @@ const favorites = {
       artist: typeof artist === 'string' ? artist : '',
       // vip / cover 仅用于展示与传给播放页；旧收藏没有这两个字段时退化成 false / ''
       vip: vip === true,
-      cover: typeof cover === 'string' ? cover : '',
+      cover: normalizeCoverUrl(cover),
     });
     return this.write(items);
   },
@@ -1955,7 +1972,7 @@ function buildVolumeControl(shouldBuild) {
  * 把 URL 放进 CSS url() 时转义引号和反斜杠，避免封面地址里的特殊字符破坏样式
  */
 function cssUrl(url) {
-  return `url("${String(url).replace(/["\\\n]/g, ch => '\\' + ch)}")`;
+  return `url("${String(url).replace(/[\r\n\f]/g, '').replace(/["\\]/g, ch => '\\' + ch)}")`;
 }
 
 /**
@@ -2049,7 +2066,7 @@ async function loadTrack() {
   const meta = {
     title: params.get('title') || '',
     artist: params.get('artist') || '',
-    cover: params.get('cover') || '',
+    cover: normalizeCoverUrl(params.get('cover') || ''),
     vip: params.get('vip') === '1',
   };
 
