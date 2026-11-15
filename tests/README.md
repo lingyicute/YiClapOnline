@@ -29,8 +29,13 @@ pip install -r tests/requirements.txt
 # 1. 起站点
 python3 -m http.server 8000 &
 
-# 2. 无 Linux 声卡的环境（容器/WSL/服务器）需要虚拟声卡，否则音频流无法启动
-printf 'pcm.!default {\n  type null\n}\n' > ~/.asoundrc
+# 2. 无 Linux 声卡的环境（容器/WSL/服务器）需要虚拟声卡，否则音频流无法启动。
+#    Firefox 只走 PulseAudio，ALSA null 设备对它无效（播放会报 Failed to decode media），
+#    需要起 PulseAudio 并挂一个 null sink：
+sudo apt-get install -y pulseaudio pulseaudio-utils
+pulseaudio --start --exit-idle-time=-1 --daemonize=yes
+pactl load-module module-null-sink sink_name=ci_null
+pactl set-default-sink ci_null
 
 # 3. 跑测试（headless）
 python3 tests/e2e.py
