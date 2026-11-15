@@ -1457,6 +1457,9 @@ function isModalActive(id) {
   return !!document.getElementById(id)?.classList.contains('active');
 }
 
+/** 音质弹窗被更新弹窗挡下过：更新弹窗关闭后再补弹（与 updateControl._deferred 对称） */
+let qualityModalDeferred = false;
+
 const updateControl = {
   _checking: false,
 
@@ -1470,12 +1473,37 @@ const updateControl = {
     this.checkStartup();
   },
 
+  /** 比对线上版本并按需弹出刷新提示 */
+  _handleRemoteVersion(remote) {
+    if (!remote) return;
+
+    // 严格按"不相等"判断而不是"大于"：万一需要回滚到旧版本，用户同样应该被切过去
+    if (remote.version === APP_VERSION) return;
+
+    // 用户本次会话里已经关掉过这个版本的弹窗，切回标签页时就别再弹了
+    try {
+      if (sessionStorage.getItem(UPDATE_DISMISSED_KEY) === remote.version) return;
+    } catch {}
+
+    this.showUpdateModal(remote);
+  },
+
   /**
-   * 启动时先看有没有该展示的更新日志，再复用同一次拉取结果做版本检查，避免连发两次请求
+   * 启动时先看有没有该展示的更新日志，再复用同一次拉取结果做版本检查；
+   * 全程持有 _checking 锁，避免期间 visibilitychange 并发再发一次请求。
    */
   async checkStartup() {
-    const res = await this.showChangelogIfUpgraded();
-    await this.checkForUpdate(res && res.fetched ? res.remote : undefined);
+    if (this._checking) return;
+    this._checking = true;
+    try {
+      const res = await this.showChangelogIfUpgraded();
+      const remote = res && res.fetched ? res.remote : await this.fetchRemote();
+      this._handleRemoteVersion(remote);
+    } catch (e) {
+      console.error('检查更新出错:', e);
+    } finally {
+      this._checking = false;
+    }
   },
 
   /**
@@ -1493,8 +1521,11 @@ const updateControl = {
       });
       if (!res.ok) return null;
       const data = await res.json();
-      if (!data || data.version === undefined || data.version === null) return null;
-      return { ...data, version: String(data.version) };
+      const rawVer = data && (typeof data.version === 'string' || typeof data.version === 'number')
+        ? String(data.version).trim()
+        : '';
+      if (!rawVer) return null;
+      return { ...data, version: rawVer };
     } finally {
       if (timer !== null) clearTimeout(timer);
     }
@@ -1505,17 +1536,7 @@ const updateControl = {
     this._checking = true;
     try {
       const remote = prefetched !== undefined ? prefetched : await this.fetchRemote();
-      if (!remote) return;
-
-      // 严格按"不相等"判断而不是"大于"：万一需要回滚到旧版本，用户同样应该被切过去
-      if (remote.version === APP_VERSION) return;
-
-      // 用户本次会话里已经关掉过这个版本的弹窗，切回标签页时就别再弹了
-      try {
-        if (sessionStorage.getItem(UPDATE_DISMISSED_KEY) === remote.version) return;
-      } catch {}
-
-      this.showUpdateModal(remote);
+      this._handleRemoteVersion(remote);
     } catch (e) {
       console.error('检查更新出错:', e);
     } finally {
@@ -1565,6 +1586,7 @@ const updateControl = {
       return;
     }
 
+    const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const isChangelog = mode === 'changelog';
     if (title) title.textContent = isChangelog ? '更新内容' : '发现新版本';
     updateTime.textContent = data.updateTime ? `更新时间: ${data.updateTime}` : '';
@@ -1581,6 +1603,11 @@ const updateControl = {
       overlay.classList.remove('active');
       modal.classList.remove('active');
       if (onKeydown) document.removeEventListener('keydown', onKeydown);
+      if (prevFocus && prevFocus.isConnected && !prevFocus.disabled) prevFocus.focus();
+      if (qualityModalDeferred) {
+        qualityModalDeferred = false;
+        openQualityModal();
+      }
     };
     const bindEscape = dismiss => {
       onKeydown = e => { if (e.key === 'Escape') dismiss(); };
@@ -1667,8 +1694,12 @@ function openQualityModal() {
   const confirmBtn = document.getElementById('qualityConfirm');
   if (!modal || !overlay || !list || !confirmBtn) return;
   if (modal.classList.contains('active')) return;
-  if (isModalActive('updateModal')) return; // 更新弹窗开着时不叠加，见 isModalActive
+  if (isModalActive('updateModal')) { // 更新弹窗开着时不叠加，关掉后再补弹
+    qualityModalDeferred = true;
+    return;
+  }
 
+  const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   list.innerHTML = '';
   let selected = getQuality();
 
@@ -1709,6 +1740,7 @@ function openQualityModal() {
     overlay.classList.remove('active');
     modal.classList.remove('active');
     document.removeEventListener('keydown', onKeydown);
+    if (prevFocus && prevFocus.isConnected && !prevFocus.disabled) prevFocus.focus();
     updateControl.resumeDeferred();
   };
   const onKeydown = e => { if (e.key === 'Escape') close(); };
