@@ -182,21 +182,22 @@ const themeControl = {
   _dark: null,
 
   isDark() {
+    if (this._dark !== null) return this._dark;
     try {
-      const stored = localStorage.getItem(THEME_KEY);
-      if (stored !== null) return stored === '1';
+      return localStorage.getItem(THEME_KEY) === '1';
     } catch {
-      /* 读不到就用内存态 */
+      return false;
     }
-    return this._dark === true;
   },
 
   toggleTheme() {
     const next = !this.isDark();
-    this._dark = next;
     try {
       localStorage.setItem(THEME_KEY, next ? '1' : '0');
+      this._dark = null;
     } catch (e) {
+      // 写入失败（如配额满但仍可读旧值）时用内存态接管，保证当前页内可正常切换
+      this._dark = next;
       console.error('[主题] 保存失败(浏览器可能禁用了 localStorage 或空间已满):', e);
     }
     this.applyTheme();
