@@ -94,7 +94,7 @@
 
 :root.light-theme .player-control .play.active {
   background-color: var(--light-sky-blue);
-  color: var(--black);
+  color: var(--on-primary);
 }
 
 :root.light-theme .music-banner {
