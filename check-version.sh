@@ -6,16 +6,24 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 json_ver="$(python3 - <<'EOF'
-import json, pathlib, sys
-data = json.loads(pathlib.Path('update.json').read_text(encoding='utf-8'))
+import json, pathlib, re, sys
+try:
+    data = json.loads(pathlib.Path('update.json').read_text(encoding='utf-8'))
+except (OSError, json.JSONDecodeError) as e:
+    sys.exit(f'✗ update.json 读取或解析失败: {e}')
 ver = data.get('version') if isinstance(data, dict) else None
-if not isinstance(ver, str) or not ver.isdigit():
+if not isinstance(ver, str) or not re.fullmatch(r'[0-9]+', ver):
     sys.exit('✗ update.json 中的 version 缺失或格式非法')
 print(ver)
 EOF
 )"
 
-js_matches="$(grep -oE "^const APP_VERSION = '[0-9]+';" app.js || true)"
+if [[ ! -f app.js ]]; then
+  echo "✗ 找不到 app.js" >&2
+  exit 1
+fi
+
+js_matches="$(LC_ALL=C grep -oE "^const APP_VERSION = '[0-9]+';" app.js || true)"
 js_count="$(printf '%s\n' "$js_matches" | grep -c . || true)"
 
 if [[ "$js_count" -eq 0 ]]; then
