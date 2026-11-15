@@ -116,15 +116,24 @@
         var js = document.createElement('script');
         js.src = './app.js' + q;
         js.onerror = function () {
-          var text = document.querySelector('.loading-text');
-          if (text) text.textContent = '播放器脚本加载失败，请检查网络后重试';
+          var showError = function () {
+            var text = document.querySelector('.loading-text');
+            if (text) text.textContent = '播放器脚本加载失败，请检查网络后重试';
+          };
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showError, { once: true });
+          else showError();
         };
         document.head.appendChild(js);
       }
 
-      var timer = setTimeout(function () { boot(null); }, FETCH_TIMEOUT);
+      var controller = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () {
+        if (controller) controller.abort();
+        boot(null);
+      }, FETCH_TIMEOUT);
       try {
-        fetch('./update.json?_=' + Date.now(), { cache: 'no-store' })
+        var fetchOpts = controller ? { cache: 'no-store', signal: controller.signal } : { cache: 'no-store' };
+        fetch('./update.json?_=' + Date.now(), fetchOpts)
           .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
           .then(function (j) { clearTimeout(timer); boot(j && j.version ? String(j.version) : null); })
           .catch(function () { clearTimeout(timer); boot(null); });

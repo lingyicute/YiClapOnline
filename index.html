@@ -114,15 +114,27 @@
         var overlay = document.getElementById('main-loading-overlay');
         if (!overlay) return;
         overlay.style.opacity = '0';
-        overlay.addEventListener('transitionend', function () { overlay.remove(); }, { once: true });
+        var onEnd = function (e) {
+          if (e.target !== overlay || e.propertyName !== 'opacity') return;
+          overlay.removeEventListener('transitionend', onEnd);
+          overlay.remove();
+        };
+        overlay.addEventListener('transitionend', onEnd);
         setTimeout(function () { overlay.remove(); }, 600);
       }
 
       function showBootError() {
-        var overlay = document.getElementById('main-loading-overlay');
-        if (!overlay) return;
         hidden = true; // 别再把它淡出了
-        overlay.innerHTML = '<p class="boot-error">页面脚本加载失败，请检查网络后刷新重试。</p>';
+        var render = function () {
+          var overlay = document.getElementById('main-loading-overlay');
+          if (!overlay) return;
+          overlay.style.opacity = '1';
+          overlay.removeAttribute('aria-hidden');
+          overlay.setAttribute('role', 'alert');
+          overlay.innerHTML = '<p class="boot-error">页面脚本加载失败，请检查网络后刷新重试。</p>';
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', render, { once: true });
+        else render();
       }
 
       function boot(version) {
@@ -139,13 +151,18 @@
         var js = document.createElement('script');
         js.src = './app.js' + q;
         js.onload = resourceSettled;
-        js.onerror = function () { resourceSettled(); showBootError(); };
+        js.onerror = showBootError;
         document.head.appendChild(js);
       }
 
-      var timer = setTimeout(function () { boot(null); }, FETCH_TIMEOUT);
+      var controller = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () {
+        if (controller) controller.abort();
+        boot(null);
+      }, FETCH_TIMEOUT);
       try {
-        fetch('./update.json?_=' + Date.now(), { cache: 'no-store' })
+        var fetchOpts = controller ? { cache: 'no-store', signal: controller.signal } : { cache: 'no-store' };
+        fetch('./update.json?_=' + Date.now(), fetchOpts)
           .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
           .then(function (j) { clearTimeout(timer); boot(j && j.version ? String(j.version) : null); })
           .catch(function () { clearTimeout(timer); boot(null); });
