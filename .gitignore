@@ -1,0 +1,12 @@
+# E2E 测试产物（截图与 report.json，见 tests/README.md）
+test-results/
+test-results-webkit/
+
+# Python
+__pycache__/
+*.pyc
+
+# 本地临时文件
+nohup.out
+site.log
+.DS_Store
