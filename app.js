@@ -847,13 +847,22 @@ const containerControl = {
     });
   },
 
-  // 隐藏除 exceptContainer 之外的所有容器，全部隐藏完成后执行 callback
+  /** hideAllContainers 的调用序号：只有最近一次调用的 callback 才会执行 */
+  _hideAllSeq: 0,
+
+  // 隐藏除 exceptContainer 之外的所有容器，全部隐藏完成后执行 callback。
+  // 若隐藏期间又发起了新的 hideAllContainers，旧的 callback 作废，以最后一次为准——
+  // 否则迟到的旧回调会把新内容覆盖掉(例如旧的错误提示盖住新的提示)
   hideAllContainers(exceptContainer, callback) {
+    const seq = ++this._hideAllSeq;
+    const finish = () => {
+      if (callback && seq === this._hideAllSeq) callback();
+    };
     const targets = [resultsContainer, favoritesContainer, noResults, placeholder]
       .filter(el => el && el !== exceptContainer && el.style.display !== 'none');
 
     if (targets.length === 0) {
-      if (callback) callback();
+      finish();
       return;
     }
 
@@ -861,7 +870,7 @@ const containerControl = {
     targets.forEach(el => {
       this.hideContainer(el, () => {
         hidden++;
-        if (hidden === targets.length && callback) callback();
+        if (hidden === targets.length) finish();
       });
     });
   }
