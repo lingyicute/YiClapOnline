@@ -24,6 +24,9 @@
   --card-bg: #fff;
   --border-color: #e0e0e0;
   --shadow-color: rgba(0, 0, 0, 0.1);
+  --top-btn-bg: rgba(255, 255, 255, 0.8);
+  --top-btn-border: rgba(0, 0, 0, 0.1);
+  --play-btn-bg: #eee;
   --radius-md: 12px;
   --radius-lg: 24px;
   --transition-normal: 0.3s ease;
@@ -38,6 +41,9 @@
   --card-bg: #1E1E1E;
   --border-color: #333;
   --shadow-color: rgba(0, 0, 0, 0.3);
+  --top-btn-bg: rgba(30, 30, 30, 0.8);
+  --top-btn-border: rgba(255, 255, 255, 0.12);
+  --play-btn-bg: #333;
 }
 
 * {
@@ -114,9 +120,9 @@ header {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.8);
+  background-color: var(--top-btn-bg);
   color: var(--text-color);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--top-btn-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,10 +140,6 @@ header {
 .top-btn:focus-visible {
   outline: 2px solid var(--primary-color);
   outline-offset: 2px;
-}
-
-:root.dark-theme .top-btn {
-  background-color: rgba(30, 30, 30, 0.8);
 }
 
 #favorites-btn {
@@ -389,7 +391,7 @@ main {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background-color: #eee;
+  background-color: var(--play-btn-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -408,10 +410,6 @@ main {
 .remove-button:focus-visible {
   outline: 2px solid var(--primary-color);
   outline-offset: 2px;
-}
-
-:root.dark-theme .play-button {
-  background-color: #333;
 }
 
 .play-button .material-symbols-rounded {
