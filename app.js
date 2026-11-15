@@ -977,6 +977,17 @@ function buildSongRow({ id, title, artist, vip, cover }, removable) {
 }
 
 /**
+ * 搜索结果/错误即将占据界面。等待期间用户可能又打开过收藏面板
+ * (performSearch 开头只重置过一次)，结果一到它就被替换掉了，
+ * 这里要把状态一并收回来，否则 favoritesOpen 仍为 true，
+ * 之后点收藏按钮会误走"关闭"分支而打不开收藏列表。
+ */
+function markFavoritesClosed() {
+  favoritesOpen = false;
+  viewBeforeFavorites = null;
+}
+
+/**
  * 执行搜索
  * @param {string} query - 搜索关键词
  */
@@ -989,9 +1000,11 @@ async function performSearch(query) {
   try {
     const results = await musicSource.search(query);
     if (seq !== searchSeq) return; // 期间又发起了新搜索，丢弃这次的过期结果
+    markFavoritesClosed();
     displaySearchResults(results);
   } catch (error) {
     if (seq !== searchSeq) return;
+    markFavoritesClosed();
     console.error('搜索出错:', error);
     displayError(error?.message || '搜索过程中发生错误，请稍后重试');
   } finally {
