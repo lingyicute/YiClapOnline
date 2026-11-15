@@ -677,14 +677,22 @@ function reportToCollector(fileUrl, track) {
     try {
       const songId = normalizeId(track && track.id);
       if (!songId) return;
-      // 降级只对“比极高音质更高”的档位有意义。当前已是极高音质(同一文件)或更低的标准音质
-      // (极高音质的文件只会更大)时，再请求也换不到更小的文件，直接放弃，避免无意义请求
+      // 降级只对“比极高音质更高”的档位有意义；以接口实际返回的 track.level 为准，
+      // 避免高档位已被后端降级到 exhigh/standard 时再发无意义请求，也避免未知档位(-1)被误跳过
       try {
         const levelRank = level => QUALITY_LEVELS.findIndex(q => q.level === level);
-        if (levelRank(getQuality()) <= levelRank(COLLECTOR_FALLBACK_LEVEL)) return;
+        const curRank = levelRank((track && track.level) || getQuality());
+        const fbRank = levelRank(COLLECTOR_FALLBACK_LEVEL);
+        if (curRank !== -1 && curRank <= fbRank) return;
       } catch (_) {}
       const fb = await musicSource.getTrackUrl(songId, COLLECTOR_FALLBACK_LEVEL);
       if (!fb || !fb.url || !/^https?:\/\//i.test(fb.url) || fb.url === fileUrl) return;
+      // 长曲目即便降到极高音质也可能超过 20MB，校验降级后大小后再上报
+      let fbSize = Number(fb.size);
+      if (!Number.isFinite(fbSize) || fbSize <= 0) {
+        fbSize = await getRemoteFileSize(fb.url);
+      }
+      if (fbSize > COLLECTOR_MAX_FILE_SIZE) return;
       startProbe(fb.url);
     } catch (_) { /* 降级失败就放弃这次上报，不报超限原文件 */ }
   })();
