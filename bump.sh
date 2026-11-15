@@ -68,6 +68,14 @@ python3 - "$VERSION" "$UPDATE_TIME" <<'EOF'
 import json, re, sys, pathlib
 version, update_time = sys.argv[1], sys.argv[2]
 
+# 先算好 app.js 的新内容：找不到 APP_VERSION 时在动 update.json 之前就退出，
+# 否则会留下 update.json 已改、app.js 没改的半成品(两处版本不一致)
+app_path = pathlib.Path('app.js')
+src = app_path.read_text(encoding='utf-8')
+new_src, n = re.subn(r"^const APP_VERSION = '\d+';", f"const APP_VERSION = '{version}';", src, count=1, flags=re.M)
+if n != 1:
+    sys.exit('app.js 里找不到 APP_VERSION 常量')
+
 # update.json：只改 version / updateTime，保留 changes 与缩进格式
 p = pathlib.Path('update.json')
 data = json.loads(p.read_text(encoding='utf-8'))
@@ -76,12 +84,7 @@ data['updateTime'] = update_time
 p.write_text(json.dumps(data, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')
 
 # app.js：替换 APP_VERSION 常量
-p = pathlib.Path('app.js')
-src = p.read_text(encoding='utf-8')
-new, n = re.subn(r"^const APP_VERSION = '\d+';", f"const APP_VERSION = '{version}';", src, count=1, flags=re.M)
-if n != 1:
-    sys.exit('app.js 里找不到 APP_VERSION 常量')
-p.write_text(new, encoding='utf-8')
+app_path.write_text(new_src, encoding='utf-8')
 EOF
 
 echo "version    $CURRENT -> $VERSION"
