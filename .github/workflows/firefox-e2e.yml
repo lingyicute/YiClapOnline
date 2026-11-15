@@ -13,6 +13,10 @@ on:
         required: false
         default: 'false'
 
+# 最小权限：测试只需要读取代码；产物上传用的是 Actions 运行时凭据，不依赖 GITHUB_TOKEN 写权限
+permissions:
+  contents: read
+
 # 同一分支上新提交到达时，取消还在跑的旧任务
 concurrency:
   group: firefox-e2e-${{ github.ref }}
