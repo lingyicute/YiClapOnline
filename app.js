@@ -1013,6 +1013,7 @@ function setCount(container, text) {
 function reveal(container) {
   containerControl.showContainer(container, () => {
     setTimeout(() => {
+      if (!containerControl.isVisible(container)) return;
       // JS 指定的 smooth 不受 CSS scroll-behavior 约束，需自行尊重"减少动态效果"系统设置
       const reduceMotion = typeof window.matchMedia === 'function'
         && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1200,12 +1201,15 @@ function displayFavorites() {
   // 收藏列表已经开着(例如播放器里点了爱心触发的刷新)：原地重绘即可，不要整个面板淡出再淡入
   if (containerControl.isVisible(favoritesContainer)) {
     if (renderFavoritesList() === 0) {
-      containerControl.hideContainer(favoritesContainer, () => showNotice('暂无收藏歌曲'));
+      containerControl.hideAllContainers(null, () => {
+        if (favoritesOpen && favorites.read().length === 0) showNotice('暂无收藏歌曲');
+      });
     }
     return;
   }
 
   containerControl.hideAllContainers(null, () => {
+    if (!favoritesOpen) return;
     if (renderFavoritesList() === 0) {
       showNotice('暂无收藏歌曲');
       return;
@@ -1318,8 +1322,8 @@ function removeFavoriteRow(id) {
     const remainingCount = favorites.read().length;
     if (remainingCount === 0 && favoritesList.children.length === 0) {
       favoritesList.innerHTML = '';
-      containerControl.hideContainer(favoritesContainer, () => {
-        if (favoritesOpen) showNotice('暂无收藏歌曲');
+      containerControl.hideAllContainers(null, () => {
+        if (favoritesOpen && favorites.read().length === 0) showNotice('暂无收藏歌曲');
       });
       return;
     }
