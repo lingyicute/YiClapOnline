@@ -497,7 +497,12 @@ function songStem(song) {
 
 /* 静默拉取 musicdb 的 list.txt 供上报前去重（失败不打扰用户，也不拦截上报） */
 function loadMusicdbList() {
-  fetch(MUSICDB_BASE + '/list.txt', { cache: 'no-store' })
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
+  fetch(MUSICDB_BASE + '/list.txt', {
+    cache: 'no-store',
+    ...(ctrl ? { signal: ctrl.signal } : {}),
+  })
     .then(r => {
       if (!r.ok) return;
       return r.text().then(text => {
@@ -511,7 +516,8 @@ function loadMusicdbList() {
         if (console && console.info) console.info('[musicdb] 已收集 ' + set.size + ' 首');
       });
     })
-    .catch(() => { /* 静默失败 */ });
+    .catch(() => { /* 静默失败 */ })
+    .finally(() => { if (timer !== null) clearTimeout(timer); });
 }
 
 /**
@@ -531,25 +537,28 @@ async function getRemoteFileSize(url) {
 
   // 1. HEAD 请求：最省流量，大多数 CDN 都支持
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
     try {
-      const res = await fetch(url, { method: 'HEAD', signal: ctrl.signal });
+      const res = await fetch(url, { method: 'HEAD', ...(ctrl ? { signal: ctrl.signal } : {}) });
       if (res.ok) {
         const size = parsePositiveInt(res.headers.get('content-length'));
         if (size > 0) return size;
       }
     } finally {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
     }
   } catch (_) { /* 换 Range 再试 */ }
 
   // 2. Range 回退：只取首字节，从 Content-Range 的 /total 拿完整大小
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
     try {
-      const res = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal: ctrl.signal });
+      const res = await fetch(url, {
+        headers: { Range: 'bytes=0-0' },
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+      });
       let found = 0;
       if (res.ok || res.status === 206) {
         const m = /\/(\d+)\s*$/.exec(res.headers.get('content-range') || '');
@@ -561,12 +570,13 @@ async function getRemoteFileSize(url) {
           if (full > 1) found = full;
         }
       }
-      // 读完头就立刻取消 body 再返回：Range 被无视时会返回 200 + 整个文件，
-      // 不取消的话这几十 MB 会在后台白白下载一段才被 GC 掐掉
+      // 读完头就立刻取消 body 并中止请求：Range 被无视时会返回 200 + 整个文件，
+      // 避免这几十 MB 在后台白白继续下载
       try { if (res.body && typeof res.body.cancel === 'function') await res.body.cancel(); } catch (_) {}
+      try { if (ctrl) ctrl.abort(); } catch (_) {}
       if (found > 0) return found;
     } finally {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
     }
   } catch (_) { /* 拿不到就返回 0 */ }
 
@@ -599,11 +609,18 @@ function reportToCollector(fileUrl, track) {
     duration: 0,
   });
 
-  // 前端去重：收集库已收录的歌不再上报（Worker 侧还会有一次检查）
+  // 缺少歌名或歌手（如 c<ID> 直达播放）最终不会上报，提前退出避免白做体积/时长探测与降级请求
   const dedupe = payload(fileUrl);
-  try {
-    if (musicdbListLoaded && musicdbList.has(songStem({ title: dedupe.title, author: dedupe.author }))) return;
-  } catch (_) { /* 去重失败不拦截上报 */ }
+  if (!dedupe.title || !dedupe.author) return;
+  const isCollected = () => {
+    try {
+      return musicdbListLoaded && musicdbList.has(songStem({ title: dedupe.title, author: dedupe.author }));
+    } catch (_) {
+      return false; /* 去重失败不拦截上报 */
+    }
+  };
+  // 前端去重：收集库已收录的歌不再上报（Worker 侧还会有一次检查）
+  if (isCollected()) return;
 
   // 对最终要上报的那条直链探时长、满足条件才 POST（原链与降级链共用这一套）
   const startProbe = (urlToReport) => {
@@ -618,6 +635,8 @@ function reportToCollector(fileUrl, track) {
         const dur = probe.duration;
         cleanup();
         if (!Number.isFinite(dur) || dur <= COLLECTOR_MIN_DURATION) return; // ≤60 秒不上报
+        // list.txt 与取歌并行拉取，可能在探测期间才到达，POST 前再检查一次避免重复上报
+        if (isCollected()) return;
         const body = payload(urlToReport);
         body.duration = Math.round(dur);
         if (!body.title || !body.author || !body.url) return;
