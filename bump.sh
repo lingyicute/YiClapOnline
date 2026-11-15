@@ -17,10 +17,26 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TODAY="$(date +%Y%m%d)"
-CURRENT="$(python3 -c "import json;print(json.load(open('update.json',encoding='utf-8'))['version'])")"
+if [[ $# -gt 1 ]]; then
+  echo "用法: ./bump.sh [12位版本号]" >&2
+  exit 1
+fi
 
-if [[ $# -ge 1 ]]; then
+TODAY="$(date +%Y%m%d)"
+CURRENT="$(python3 - <<'EOF'
+import json, pathlib, sys
+try:
+    data = json.loads(pathlib.Path('update.json').read_text(encoding='utf-8'))
+except (OSError, json.JSONDecodeError) as e:
+    sys.exit(f'update.json 读取或解析失败: {e}')
+ver = data.get('version') if isinstance(data, dict) else None
+if not isinstance(ver, str) or not ver:
+    sys.exit('update.json 中缺少合法的 version 字段')
+print(ver)
+EOF
+)"
+
+if [[ $# -eq 1 ]]; then
   VERSION="$1"
   if ! [[ "$VERSION" =~ ^[0-9]{12}$ ]]; then
     echo "版本号必须是 12 位数字(YYYYMMDD + 4 位顺序号)，收到: $VERSION" >&2
@@ -60,25 +76,35 @@ if [[ "$VERSION" == "$CURRENT" ]]; then
   exit 1
 fi
 
-# 中文日期，和 update.json 现有格式一致；按版本号里的日期而不是今天，手动指定时两者才一致
-V_YEAR="${VERSION:0:4}"; V_MONTH="$((10#${VERSION:4:2}))"; V_DAY="$((10#${VERSION:6:2}))"
-UPDATE_TIME="${V_YEAR}年${V_MONTH}月${V_DAY}日"
+# 校验版本号前缀为合法公历日期，并生成中文日期，与 update.json 现有格式一致
+UPDATE_TIME="$(python3 - "$VERSION" <<'EOF'
+import datetime, sys
+v = sys.argv[1]
+try:
+    d = datetime.date(int(v[0:4]), int(v[4:6]), int(v[6:8]))
+except ValueError:
+    sys.exit(f'版本号中的日期部分无效(应为合法 YYYYMMDD): {v[0:8]}')
+print(f'{d.year}年{d.month}月{d.day}日')
+EOF
+)"
 
 python3 - "$VERSION" "$UPDATE_TIME" <<'EOF'
 import json, re, sys, pathlib
 version, update_time = sys.argv[1], sys.argv[2]
 
-# 先算好 app.js 的新内容：找不到 APP_VERSION 时在动 update.json 之前就退出，
-# 否则会留下 update.json 已改、app.js 没改的半成品(两处版本不一致)
+# 写任何文件前先同时校验 app.js 与 update.json，避免只改了一半留下不一致状态
 app_path = pathlib.Path('app.js')
 src = app_path.read_text(encoding='utf-8')
-new_src, n = re.subn(r"^const APP_VERSION = '\d+';", f"const APP_VERSION = '{version}';", src, count=1, flags=re.M)
-if n != 1:
+new_src, n = re.subn(r"^const APP_VERSION = '[0-9]+';", f"const APP_VERSION = '{version}';", src, flags=re.M)
+if n == 0:
     sys.exit('app.js 里找不到 APP_VERSION 常量')
+if n > 1:
+    sys.exit(f'app.js 中存在多处 APP_VERSION 定义({n} 处)')
 
-# update.json：只改 version / updateTime，保留 changes 与缩进格式
 p = pathlib.Path('update.json')
 data = json.loads(p.read_text(encoding='utf-8'))
+if not isinstance(data, dict):
+    sys.exit('update.json 根节点必须是 JSON 对象')
 data['version'] = version
 data['updateTime'] = update_time
 p.write_text(json.dumps(data, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')
