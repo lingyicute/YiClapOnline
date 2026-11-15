@@ -154,8 +154,12 @@ const QUALITY_LEVELS = [
 const QUALITY_KEY = 'yiclape:audio-quality';
 const DEFAULT_QUALITY = 'standard';
 
+// localStorage 写入失败时的内存兜底（同 themeControl._dark），确保当前页内切换生效
+let qualityFallback = null;
+
 /** 读取用户选择的音质（未选择时退回默认 standard） */
 function getQuality() {
+  if (qualityFallback !== null) return qualityFallback;
   try {
     const v = localStorage.getItem(QUALITY_KEY);
     return QUALITY_LEVELS.some(q => q.level === v) ? v : DEFAULT_QUALITY;
@@ -166,7 +170,13 @@ function getQuality() {
 
 /** 保存用户选择的音质 */
 function setQuality(level) {
-  try { localStorage.setItem(QUALITY_KEY, level); } catch { /* 存储不可用时静默 */ }
+  const valid = QUALITY_LEVELS.some(q => q.level === level) ? level : DEFAULT_QUALITY;
+  try {
+    localStorage.setItem(QUALITY_KEY, valid);
+    qualityFallback = null;
+  } catch {
+    qualityFallback = valid;
+  }
 }
 
 /**
@@ -1321,13 +1331,17 @@ function preloadPlayer() {
 
   // 加载完成后一段时间移除，释放资源；即便 load 事件没触发也兜底移除，避免残留一个隐藏 iframe
   let removed = false;
+  let loadTimer = null;
+  let fallbackTimer = null;
   const remove = () => {
     if (removed) return;
     removed = true;
+    if (loadTimer !== null) clearTimeout(loadTimer);
+    if (fallbackTimer !== null) clearTimeout(fallbackTimer);
     frame.remove();
   };
-  frame.onload = () => setTimeout(remove, 5000);
-  setTimeout(remove, 30000);
+  frame.onload = () => { loadTimer = setTimeout(remove, 5000); };
+  fallbackTimer = setTimeout(remove, 30000);
 
   frame.src = './player.html';
   document.body.appendChild(frame);
@@ -1606,7 +1620,8 @@ function openQualityModal() {
   const modal = document.getElementById('qualityModal');
   const overlay = document.getElementById('qualityOverlay');
   const list = document.getElementById('qualityList');
-  if (!modal || !overlay || !list) return;
+  const confirmBtn = document.getElementById('qualityConfirm');
+  if (!modal || !overlay || !list || !confirmBtn) return;
   if (modal.classList.contains('active')) return;
   if (isModalActive('updateModal')) return; // 更新弹窗开着时不叠加，见 isModalActive
 
@@ -1616,8 +1631,10 @@ function openQualityModal() {
   QUALITY_LEVELS.forEach(q => {
     const item = document.createElement('button');
     item.type = 'button';
-    item.className = 'quality-option' + (q.level === selected ? ' active' : '');
+    const active = q.level === selected;
+    item.className = 'quality-option' + (active ? ' active' : '');
     item.dataset.level = q.level;
+    item.setAttribute('aria-pressed', String(active));
 
     const label = document.createElement('span');
     label.className = 'quality-label';
@@ -1633,12 +1650,15 @@ function openQualityModal() {
 
     item.addEventListener('click', () => {
       selected = q.level;
-      list.querySelectorAll('.quality-option').forEach(o => o.classList.toggle('active', o.dataset.level === selected));
+      list.querySelectorAll('.quality-option').forEach(o => {
+        const isSel = o.dataset.level === selected;
+        o.classList.toggle('active', isSel);
+        o.setAttribute('aria-pressed', String(isSel));
+      });
     });
     list.appendChild(item);
   });
 
-  const confirmBtn = document.getElementById('qualityConfirm');
   const close = () => {
     // 无论点“保存”还是点遮罩/Esc 关闭，都记下当前选择（默认 standard），避免首次访问被反复弹窗
     setQuality(selected);
@@ -1654,6 +1674,7 @@ function openQualityModal() {
 
   overlay.classList.add('active');
   modal.classList.add('active');
+  confirmBtn.focus();
 }
 
 /**
@@ -1744,6 +1765,9 @@ function initMainPage() {
   // (storage 事件只在"其它"文档里触发，所以主页自己的增删不会走到这里，也不需要)
   window.addEventListener('storage', event => {
     if (event.storageArea !== localStorage) return;
+    if (event.key === QUALITY_KEY || event.key === null) {
+      qualityFallback = null;
+    }
     if ((event.key === FAVORITES_KEY || event.key === null) && favoritesOpen) {
       displayFavorites();
     }
@@ -1767,9 +1791,11 @@ function initMainPage() {
 
   document.getElementById('close-player')?.addEventListener('click', closePlayer);
 
-  // Esc 关闭播放器
+  // Esc 关闭播放器（上层有更新/音质弹窗时优先交给弹窗处理，不连带关掉底层播放器）
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && playerContainer.classList.contains('active')) closePlayer();
+    if (e.key !== 'Escape') return;
+    if (isModalActive('updateModal') || isModalActive('qualityModal')) return;
+    if (playerContainer.classList.contains('active')) closePlayer();
   });
 }
 

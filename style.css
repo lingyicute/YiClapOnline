@@ -761,6 +761,11 @@ main {
   background-color: var(--primary-hover);
 }
 
+.update-modal-button button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 .update-modal-button button:disabled {
   opacity: 0.7;
   cursor: default;
@@ -834,6 +839,11 @@ main {
   background: rgba(66, 133, 244, 0.12);
 }
 
+.quality-option:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 .quality-label {
   font-weight: 500;
   font-size: 15px;
@@ -848,4 +858,11 @@ main {
 
 :root.dark-theme .quality-warn {
   color: #ffce6b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
