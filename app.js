@@ -2254,7 +2254,7 @@ function formatSize(bytes) {
 
 /**
  * 正在进行中的下载任务管理（支持弹窗关闭后重新打开继续展示进度）
- * key: url
+ * key: `${songId}:${level}`（退回 url），避免重新打开弹窗换到新签名直链后失联
  * value: { percent: number, status: 'downloading'|'completed'|'error', listeners: Set<Function> }
  */
 const downloadTasks = new Map();
@@ -2281,11 +2281,12 @@ function getAudioExt(url) {
  * @param {string} filename
  * @param {Function} [onProgress] - 进度回调 (percent: number, status: string) => void
  * @param {number} [expectedSize] - 预估文件字节大小，用于响应头缺失 Content-Length 时的兜底
+ * @param {string} [taskKey] - 任务标识键，默认使用 url
  */
-async function seamlessDownload(url, filename, onProgress, expectedSize) {
-  const running = downloadTasks.get(url);
+async function seamlessDownload(url, filename, onProgress, expectedSize, taskKey = url) {
+  const running = downloadTasks.get(taskKey);
   if (running && running.status === 'downloading') {
-    // 同一直链已有下载在进行(例如两个音质解析出同一个文件)：只挂监听，不重复下载
+    // 同一歌曲的同一音质已有下载在进行：只挂监听，不重复下载
     if (typeof onProgress === 'function') {
       running.listeners.add(onProgress);
       try { onProgress(running.percent, 'downloading'); } catch {}
@@ -2295,13 +2296,13 @@ async function seamlessDownload(url, filename, onProgress, expectedSize) {
 
   // 每次下载都新建任务，不复用上次遗留的已完成/失败任务及其过期监听器
   const task = { percent: 0, status: 'downloading', listeners: new Set() };
-  downloadTasks.set(url, task);
+  downloadTasks.set(taskKey, task);
   if (typeof onProgress === 'function') {
     task.listeners.add(onProgress);
   }
   // 只清理自己：5 秒内重新下载时，旧任务的定时器不能把新任务从表里删掉
   const forgetLater = () => setTimeout(() => {
-    if (downloadTasks.get(url) === task) downloadTasks.delete(url);
+    if (downloadTasks.get(taskKey) === task) downloadTasks.delete(taskKey);
   }, 5000);
 
   const notify = (percent, status) => {
@@ -2353,6 +2354,7 @@ async function seamlessDownload(url, filename, onProgress, expectedSize) {
       notify(100, 'downloading');
       const mime = resp.headers.get('content-type') || 'application/octet-stream';
       blob = new Blob(chunks, { type: mime });
+      chunks.length = 0; // 构造 Blob 后尽快释放分片引用，降低无损/母带文件的内存峰值
     } else {
       blob = await resp.blob();
       notify(100, 'downloading');
@@ -2380,6 +2382,7 @@ async function seamlessDownload(url, filename, onProgress, expectedSize) {
 
 /** 在下载弹窗里追加一行（某音质 + 大小 + 下载按钮） */
 function renderDownloadRow(list, item, safeTitle, { before = null, registerCleanup } = {}) {
+  const taskKey = item.taskKey || item.url;
   const row = document.createElement('div');
   row.className = 'download-row';
 
@@ -2411,7 +2414,7 @@ function renderDownloadRow(list, item, safeTitle, { before = null, registerClean
   const applyStatus = (percent, status) => {
     if (!dlBtn.isConnected) {
       clearResetTimer();
-      const task = downloadTasks.get(item.url);
+      const task = downloadTasks.get(taskKey);
       if (task) task.listeners.delete(applyStatus);
       return;
     }
@@ -2453,13 +2456,13 @@ function renderDownloadRow(list, item, safeTitle, { before = null, registerClean
   if (typeof registerCleanup === 'function') {
     registerCleanup(() => {
       clearResetTimer();
-      const task = downloadTasks.get(item.url);
+      const task = downloadTasks.get(taskKey);
       if (task) task.listeners.delete(applyStatus);
     });
   }
 
-  // 检查该音频直链是否已有进行中的下载任务（例如关闭弹窗后再次打开）
-  const ongoingTask = downloadTasks.get(item.url);
+  // 检查该歌曲的该音质是否已有进行中的下载任务（例如关闭弹窗后再次打开）
+  const ongoingTask = downloadTasks.get(taskKey);
   if (ongoingTask && ongoingTask.status === 'downloading') {
     applyStatus(ongoingTask.percent, 'downloading');
     ongoingTask.listeners.add(applyStatus);
@@ -2474,7 +2477,7 @@ function renderDownloadRow(list, item, safeTitle, { before = null, registerClean
     dlBtn.textContent = '下载中...0%';
 
     const ext = getAudioExt(item.url);
-    seamlessDownload(item.url, `${safeTitle} (${item.label}).${ext}`, applyStatus, item.size);
+    seamlessDownload(item.url, `${safeTitle} (${item.label}).${ext}`, applyStatus, item.size, taskKey);
   });
   row.appendChild(dlBtn);
 
@@ -2499,15 +2502,17 @@ async function openDownloadModal() {
   if (!modal || !overlay || !list || !closeBtn || !currentSong?.id) return;
   if (modal.classList.contains('active')) return;
 
+  const songId = currentSong.id;
   // 关掉再打开后，上一次还没返回的解析请求不能再往新弹窗里追加行(会出现重复行)，
   // 弹窗关闭后也不必再把剩下的音质解析完
   const seq = ++downloadModalSeq;
   const stale = () => seq !== downloadModalSeq;
   const cleanups = [];
   const registerCleanup = fn => cleanups.push(fn);
-  // 已展示过的实际音质：接口对不存在的档位会降级返回较低档位的文件，
+  // 已展示过的实际音质与直链：接口对不存在的档位会降级返回较低档位的文件，
   // 若照单全收，同一个文件会以不同标签(如 Hi-Res / 无损)重复出现
   const shownLevels = new Set();
+  const shownUrls = new Set();
 
   const safeTitle = sanitizeStem(currentSong.title || 'music');
   list.innerHTML = '<div class="download-loading">正在解析标准音质…</div>';
@@ -2529,11 +2534,18 @@ async function openDownloadModal() {
 
   // 先解析并展示标准音质
   try {
-    const std = await musicSource.getTrackUrl(currentSong.id, 'standard');
+    const std = await musicSource.getTrackUrl(songId, 'standard');
     if (stale()) return;
     list.querySelector('.download-loading')?.remove();
     shownLevels.add(std.level);
-    renderDownloadRow(list, { label: '标准音质', url: std.url, size: std.size }, safeTitle, { registerCleanup });
+    shownUrls.add(std.url);
+    const stdActual = QUALITY_LEVELS.find(item => item.level === std.level) || QUALITY_LEVELS[0];
+    renderDownloadRow(
+      list,
+      { label: stdActual.label, url: std.url, size: std.size, taskKey: `${songId}:${std.level}` },
+      safeTitle,
+      { registerCleanup }
+    );
   } catch (e) {
     if (stale()) return;
     list.querySelector('.download-loading')?.remove();
@@ -2565,19 +2577,22 @@ async function openDownloadModal() {
     moreBtn.textContent = '正在解析更高音质…';
     for (const q of QUALITY_LEVELS.filter(q => q.level !== 'standard')) {
       try {
-        const r = await musicSource.getTrackUrl(currentSong.id, q.level);
+        const r = await musicSource.getTrackUrl(songId, q.level);
         if (stale()) return;
-        if (shownLevels.has(r.level)) {
+        if (shownLevels.has(r.level) || shownUrls.has(r.url)) {
           appendUnavailableRow(q.label, '该歌曲暂无此音质');
           continue;
         }
         shownLevels.add(r.level);
+        shownUrls.add(r.url);
         // 标签按实际返回的音质写，避免文件名/标签与内容不符
         const actual = QUALITY_LEVELS.find(item => item.level === r.level) || q;
-        renderDownloadRow(list, { label: actual.label, url: r.url, size: r.size }, safeTitle, {
-          before: moreBtn,
-          registerCleanup,
-        });
+        renderDownloadRow(
+          list,
+          { label: actual.label, url: r.url, size: r.size, taskKey: `${songId}:${r.level}` },
+          safeTitle,
+          { before: moreBtn, registerCleanup }
+        );
       } catch {
         if (stale()) return;
         appendUnavailableRow(q.label, '解析失败');
