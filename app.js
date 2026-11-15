@@ -2009,7 +2009,8 @@ function updateDuration() {
     return;
   }
 
-  playerSeekRange.max = String(Math.ceil(duration));
+  // 与 getTimecode 的向下取整对齐，避免拖到最右端时当前时间比总时长多出 1 秒
+  playerSeekRange.max = String(Math.max(1, Math.floor(duration)));
   playerDuration.textContent = getTimecode(duration);
   updateRangeFill();
 }
@@ -2018,9 +2019,13 @@ function updateDuration() {
  * 更新播放进度(由 audio 的 timeupdate 事件驱动，不再用 setInterval 轮询)
  */
 function updateRunningTime() {
-  if (isSeeking || !playerSeekRange || !playerRunningTime) return;
-  playerSeekRange.value = String(audioSource.currentTime);
-  playerRunningTime.textContent = getTimecode(audioSource.currentTime);
+  // ended 之后偶发的尾随 timeupdate 不应把已归零的进度条再拉回末尾
+  if (isSeeking || audioSource.ended || !playerSeekRange || !playerRunningTime) return;
+  const cur = Number.isFinite(audioSource.currentTime) && audioSource.currentTime > 0
+    ? Math.floor(audioSource.currentTime)
+    : 0;
+  playerSeekRange.value = String(cur);
+  playerRunningTime.textContent = getTimecode(cur);
   updateRangeFill();
 }
 
@@ -2665,6 +2670,9 @@ function initPlayerPage() {
   const setPlayingUI = playing => {
     playBtn?.classList.toggle('active', playing);
     playBtn?.setAttribute('aria-label', playing ? '暂停' : '播放');
+    if ('mediaSession' in navigator) {
+      try { navigator.mediaSession.playbackState = playing ? 'playing' : 'paused'; } catch {}
+    }
   };
 
   audioSource.addEventListener('play', () => setPlayingUI(true));
@@ -2715,16 +2723,21 @@ function initPlayerPage() {
       return;
     }
     const clamped = Math.min(duration, Math.max(0, target));
+    playerSeekRange.value = String(Math.floor(clamped));
+    if (playerRunningTime) playerRunningTime.textContent = getTimecode(clamped);
+    updateRangeFill();
     // 松手兜底和随后的 change 都会走到这里，已经在目标位置就不重复 seek
     if (Math.abs(audioSource.currentTime - clamped) < 0.01) return;
     audioSource.currentTime = clamped;
   };
   playerSeekRange?.addEventListener('change', commitSeek);
-  // 拖动后又回到起始值时浏览器不会触发 change，isSeeking 会一直卡在 true，
-  // 进度条从此不再跟随播放。松手 / 失焦时若仍处于拖动状态，就在这里收尾
-  ['pointerup', 'pointercancel', 'blur'].forEach(type => {
-    playerSeekRange?.addEventListener(type, () => { if (isSeeking) commitSeek(); });
+  // 拖动后又回到起始值时浏览器不会触发 change；指针移出滑块再松开时事件落在 window 上，
+  // 需同时监听 window 的 pointerup/pointercancel 与滑块 blur，避免 isSeeking 永久卡死
+  const finishSeekIfPending = () => { if (isSeeking) commitSeek(); };
+  ['pointerup', 'pointercancel'].forEach(type => {
+    window.addEventListener(type, finishSeekIfPending);
   });
+  playerSeekRange?.addEventListener('blur', finishSeekIfPending);
 
   // 下载按钮：打开下载弹窗（音质选择 + 无感下载，不打开新页面）
   document.querySelector('[data-download]')?.addEventListener('click', openDownloadModal);
