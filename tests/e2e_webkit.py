@@ -109,6 +109,14 @@ def shot(fname):
     print(f"  -> {fname}", flush=True)
 
 
+def parse_timecode(tc):
+    try:
+        m, s = str(tc).strip().split(":", 1)
+        return int(m) * 60 + int(s)
+    except Exception:
+        return -1
+
+
 def open_playable_song(limit=8):
     """从当前结果列表里找到一首 loadTrack 成功的歌。
 
@@ -117,16 +125,22 @@ def open_playable_song(limit=8):
     真实用户的正常行为也是换一首。
     返回 (歌曲元数据 dict, player_frame)；均失败时返回 (None, None)。
     """
+    from urllib.parse import parse_qs, urlparse
+
     cands = page.evaluate(f"""() => [...document.querySelectorAll('#results-list .result-item .play-button')]
         .slice(0, {limit}).map(x=>({{id:x.dataset.songId, title:x.dataset.title,
         artist:x.dataset.artist, vip:x.dataset.vip, cover:x.dataset.cover}}))""")
     for cand in cands:
-        # 点播放必定让 #player-frame 导航到带 ?id= 的新地址（与启动时的预加载
-        # iframe 区分开），直接等这次导航即可，无竞态。
+        # 点播放必定让 #player-frame 导航到带对应 ?id= 的新地址（与预加载 iframe 及
+        # 上一首失败歌曲区分开），直接等匹配该候选 ID 的导航即可，无竞态。
+        cid = str(cand["id"])
         try:
             with page.expect_event(
                 "framenavigated",
-                predicate=lambda f: "player.html?id=" in (f.url or ""),
+                predicate=lambda f, target_id=cid: (
+                    "player.html" in (f.url or "")
+                    and parse_qs(urlparse(f.url or "").query).get("id") == [target_id]
+                ),
                 timeout=WAIT_MS,
             ) as ev:
                 clicked = page.evaluate("""(id) => {
@@ -253,11 +267,22 @@ def _():
     rec("播放进度前进", advanced not in (None, False, "0:00"), f"0:00 -> {advanced}")
 
     seek_before = fr.evaluate(rt)
-    fr.evaluate("""() => { var r=document.querySelector('[data-seek]');
-        r.value = Math.min(30, parseFloat(r.max));
-        r.dispatchEvent(new Event('change',{bubbles:true})); }""")
-    after = poll_until(lambda: (lambda v: v if (v != seek_before and v != "0:00") else False)(fr.evaluate(rt)), timeout=15)
-    rec("拖动进度条（seek）生效", bool(after), f"seek前={seek_before} 当前={after}")
+    before_s = parse_timecode(seek_before)
+    max_s = int(float(fr.evaluate("() => document.querySelector('[data-seek]').max") or 0))
+    if before_s >= 0 and before_s + 25 < max_s:
+        target_s = min(max(30, before_s + 25), max_s - 5)
+        seek_ok = lambda v: parse_timecode(v) >= target_s - 2
+    elif before_s >= 30:
+        target_s = max(5, before_s - 30)
+        seek_ok = lambda v: 0 < parse_timecode(v) < before_s - 5
+    else:
+        target_s = min(30, max_s) if max_s > 0 else 0
+        seek_ok = lambda v: v != seek_before and v != "0:00"
+    fr.evaluate("""(target) => { var r=document.querySelector('[data-seek]');
+        r.value = target;
+        r.dispatchEvent(new Event('change',{bubbles:true})); }""", target_s)
+    after = poll_until(lambda: (lambda v: v if seek_ok(v) else False)(fr.evaluate(rt)), timeout=15)
+    rec("拖动进度条（seek）生效", bool(after), f"seek前={seek_before} 目标={target_s}s 当前={after}")
 
     vol = fr.evaluate(
         "() => !!document.querySelector('#volume-container input[type=range], #volume-container .range, #volume-container button')")
@@ -272,6 +297,7 @@ def _():
         return fr.evaluate(f"""() => {{ var r=document.querySelector('{sel}');
             if(!r) return null;
             var f=r.nextElementSibling;
+            if(!f) return null;
             var ri=r.getBoundingClientRect(), rf=f.getBoundingClientRect();
             var ratio = parseFloat(r.max) > 0 ? parseFloat(r.value)/parseFloat(r.max) : 0;
             return {{ dy: Math.abs((rf.top+rf.bottom)/2 - (ri.top+ri.bottom)/2),

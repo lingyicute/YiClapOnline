@@ -98,6 +98,14 @@ def poll_until(fn, timeout=30, interval=1.0):
         time.sleep(interval)
 
 
+def parse_timecode(tc):
+    try:
+        m, s = str(tc).strip().split(":", 1)
+        return int(m) * 60 + int(s)
+    except Exception:
+        return -1
+
+
 def open_playable_song(limit=8):
     """从当前结果列表里找到一首 loadTrack 成功的歌并停留在播放器 iframe 内。
 
@@ -123,10 +131,17 @@ def open_playable_song(limit=8):
             "return document.getElementById('player-container').classList.contains('active')"))
         src = b.execute_script("return document.getElementById('player-frame').src")
         b.switch_to.frame(b.find_element(By.ID, "player-frame"))
+        def overlay_ready(d, cid=str(cand["id"])):
+            try:
+                return bool(d.execute_script(
+                    "if (new URLSearchParams(location.search).get('id') !== arguments[0]) return false;"
+                    "var o=document.getElementById('loadingOverlay');"
+                    "return !!(o && o.classList.contains('hidden'));", cid))
+            except Exception:
+                # 导航切换瞬间文档卸载会抛临时异常，继续轮询而非提前跳过候选歌曲
+                return False
         try:
-            wait.until(lambda d: d.execute_script(
-                "var o=document.getElementById('loadingOverlay');"
-                "return !!(o && o.classList.contains('hidden'))"))
+            wait.until(overlay_ready)
         except Exception:
             pass
         title = (b.execute_script(
@@ -230,11 +245,22 @@ def _():
     rec("播放进度前进", advanced not in (None, False, "0:00"), f"0:00 -> {advanced}")
 
     seek_before = b.execute_script(rt)
+    before_s = parse_timecode(seek_before)
+    max_s = int(float(b.execute_script("return document.querySelector('[data-seek]').max") or 0))
+    if before_s >= 0 and before_s + 25 < max_s:
+        target_s = min(max(30, before_s + 25), max_s - 5)
+        seek_ok = lambda v: parse_timecode(v) >= target_s - 2
+    elif before_s >= 30:
+        target_s = max(5, before_s - 30)
+        seek_ok = lambda v: 0 < parse_timecode(v) < before_s - 5
+    else:
+        target_s = min(30, max_s) if max_s > 0 else 0
+        seek_ok = lambda v: v != seek_before and v != "0:00"
     b.execute_script("""var r=document.querySelector('[data-seek]');
-        r.value = Math.min(30, parseFloat(r.max));
-        r.dispatchEvent(new Event('change',{bubbles:true}));""")
-    after = poll_until(lambda: (lambda v: v if (v != seek_before and v != "0:00") else False)(b.execute_script(rt)), timeout=15)
-    rec("拖动进度条（seek）生效", bool(after), f"seek前={seek_before} 当前={after}")
+        r.value = arguments[0];
+        r.dispatchEvent(new Event('change',{bubbles:true}));""", target_s)
+    after = poll_until(lambda: (lambda v: v if seek_ok(v) else False)(b.execute_script(rt)), timeout=15)
+    rec("拖动进度条（seek）生效", bool(after), f"seek前={seek_before} 目标={target_s}s 当前={after}")
 
     vol = b.execute_script(
         "return !!document.querySelector('#volume-container input[type=range], #volume-container .range, #volume-container button')")
@@ -248,6 +274,7 @@ def _():
         return b.execute_script(f"""var r=document.querySelector('{sel}');
             if(!r) return null;
             var f=r.nextElementSibling;
+            if(!f) return null;
             var ri=r.getBoundingClientRect(), rf=f.getBoundingClientRect();
             var ratio = parseFloat(r.max) > 0 ? parseFloat(r.value)/parseFloat(r.max) : 0;
             return {{ dy: Math.abs((rf.top+rf.bottom)/2 - (ri.top+ri.bottom)/2),
