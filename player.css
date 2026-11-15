@@ -1060,6 +1060,18 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   opacity: 1;
 }
 
+/* 完成/失败后的 3 秒里按钮仍是 disabled，而上面深色主题的 :disabled 规则优先级更高，
+   会把绿色/红色盖成灰色，这里用同等优先级补回来 */
+:root.dark-theme .download-row-btn.download-success {
+  background-color: #34a853;
+  color: #ffffff;
+}
+
+:root.dark-theme .download-row-btn.download-error-btn {
+  background-color: #ea4335;
+  color: #ffffff;
+}
+
 .download-more-btn {
   align-self: flex-start;
   margin-top: 0.4rem;
