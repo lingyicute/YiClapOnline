@@ -1368,9 +1368,12 @@ function preloadPlayer() {
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.tabIndex = -1;
+  // 仅设 tabIndex=-1 无法阻止键盘 Tab 落入 iframe 内部按钮；visibility:hidden + inert 双保险
+  if ('inert' in frame) frame.inert = true;
   Object.assign(frame.style, {
     width: '0', height: '0', border: 'none',
-    position: 'absolute', left: '-9999px', top: '-9999px'
+    position: 'absolute', left: '-9999px', top: '-9999px',
+    visibility: 'hidden', pointerEvents: 'none'
   });
 
   // 加载完成后一段时间移除，释放资源；即便 load 事件没触发也兜底移除，避免残留一个隐藏 iframe
