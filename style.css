@@ -864,5 +864,7 @@ main {
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    /* 无限循环动画(搜索按钮的转圈)压到 0.01ms 会变成高速闪烁，反而更刺眼，只播一次停在末帧 */
+    animation-iteration-count: 1 !important;
   }
 }

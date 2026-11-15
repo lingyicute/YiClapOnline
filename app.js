@@ -985,7 +985,12 @@ function setCount(container, text) {
  */
 function reveal(container) {
   containerControl.showContainer(container, () => {
-    setTimeout(() => container.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    setTimeout(() => {
+      // JS 指定的 smooth 不受 CSS scroll-behavior 约束，需自行尊重"减少动态效果"系统设置
+      const reduceMotion = typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      container.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    }, 100);
   });
 }
 
