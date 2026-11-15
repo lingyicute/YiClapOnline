@@ -1,0 +1,28 @@
+name: 版本一致性检查
+
+# update.json 的 version 与 app.js 的 APP_VERSION 不一致时，用户会在每次打开页面时
+# 被弹“发现新版本”却永远刷不掉。这里在每次提交 / PR 时提前拦住，不需要启动浏览器，几秒即可跑完。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: version-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version-check:
+    name: 校验 update.json 与 APP_VERSION
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行 check-version.sh
+        run: bash check-version.sh
