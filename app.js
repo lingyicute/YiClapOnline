@@ -769,12 +769,21 @@ const favorites = {
     id = normalizeId(id);
     if (!id) return false;
 
-    if (this.has(id)) {
-      this.remove(id);
-    } else {
-      this.add({ id, title, artist, vip, cover });
+    const items = this.read();
+    const idx = items.findIndex(item => item.id === id);
+    if (idx !== -1) {
+      items.splice(idx, 1);
+      return this.write(items) ? false : true;
     }
-    return this.has(id);
+
+    items.push({
+      id,
+      title: typeof title === 'string' ? title : '',
+      artist: typeof artist === 'string' ? artist : '',
+      vip: vip === true,
+      cover: normalizeCoverUrl(cover),
+    });
+    return this.write(items);
   },
 
   /** 启动清理：历史遗留的 cookie / localStorage / sessionStorage 键，只删不读 */
@@ -828,8 +837,10 @@ let closePlayerTimer = null;
  * 结果是淡出动画从第二次开始就永远不生效（只剩 visibility 在 0.5s 后瞬间切换）。
  */
 const containerControl = {
-  /** 每个容器最近一次 hide 的定时器，show 时取消，避免"先隐藏后显示"被迟到的 hide 回调又藏起来 */
+  /** 每个容器最近一次 hide 的定时器和等待回调列表，show 时取消，避免"先隐藏后显示"被迟到的 hide 回调又藏起来 */
   _pendingHide: new WeakMap(),
+  /** 每个容器尚未执行的 show 动画帧，hide / 重复 show 时取消，避免过期 rAF 把容器重新淡入 */
+  _pendingShow: new WeakMap(),
 
   /** 容器是否处于可见状态(display 不为 none 且不在淡出过程中) */
   isVisible(container) {
@@ -839,25 +850,35 @@ const containerControl = {
   },
 
   hideContainer(container, callback) {
+    if (container) {
+      const pendingRaf = this._pendingShow.get(container);
+      if (pendingRaf !== undefined) {
+        cancelAnimationFrame(pendingRaf);
+        this._pendingShow.delete(container);
+      }
+    }
+
     if (!container || container.style.display === 'none') {
       if (callback) callback();
       return;
     }
 
-    // 已经在淡出中：不重复起定时器，直接回调即可
-    if (this._pendingHide.has(container)) {
-      if (callback) callback();
+    // 已经在淡出中：挂载到同一个定时器上等待真正隐藏后再回调，避免新旧容器短暂叠放跳动
+    const existing = this._pendingHide.get(container);
+    if (existing) {
+      if (callback) existing.callbacks.push(callback);
       return;
     }
 
     container.classList.remove('fade-in');
     container.classList.add('fade-out');
-    const timer = setTimeout(() => {
+    const entry = { callbacks: callback ? [callback] : [], timer: null };
+    entry.timer = setTimeout(() => {
       this._pendingHide.delete(container);
       container.style.display = 'none';
-      if (callback) callback();
+      for (const cb of entry.callbacks) cb();
     }, 500);
-    this._pendingHide.set(container, timer);
+    this._pendingHide.set(container, entry);
   },
 
   showContainer(container, callback) {
@@ -869,8 +890,14 @@ const containerControl = {
     // 若正处于淡出中，取消那次隐藏，否则 500ms 后会把刚显示的容器又藏掉
     const pending = this._pendingHide.get(container);
     if (pending !== undefined) {
-      clearTimeout(pending);
+      clearTimeout(pending.timer);
       this._pendingHide.delete(container);
+    }
+
+    const pendingRaf = this._pendingShow.get(container);
+    if (pendingRaf !== undefined) {
+      cancelAnimationFrame(pendingRaf);
+      this._pendingShow.delete(container);
     }
 
     // .no-results / .placeholder 在 CSS 里都是 flex 布局，不能一律写成 block
@@ -882,11 +909,13 @@ const containerControl = {
     container.style.display = useFlex ? 'flex' : 'block';
     void container.offsetWidth; // 强制回流，确保 fade-out 状态已经生效
 
-    requestAnimationFrame(() => {
+    const raf = requestAnimationFrame(() => {
+      this._pendingShow.delete(container);
       container.classList.remove('fade-out');
       container.classList.add('fade-in');
       if (callback) callback();
     });
+    this._pendingShow.set(container, raf);
   },
 
   /** hideAllContainers 的调用序号：只有最近一次调用的 callback 才会执行 */
@@ -1214,7 +1243,6 @@ function removeFavoriteRow(id) {
     displayFavorites(); // 存储写失败或该项已不存在：以存储为准整表重绘，避免 UI 与数据不一致
     return;
   }
-  const remaining = favorites.read();
 
   if (!row) {
     displayFavorites(); // 找不到对应行时整表重绘兜底
@@ -1232,9 +1260,13 @@ function removeFavoriteRow(id) {
   Object.assign(row.style, { opacity: '0', height: '0', margin: '0', padding: '0' });
 
   setTimeout(() => {
+    // 动画期间列表若被外部重绘（如跨文档 storage 同步），不再执行旧收尾避免清空新内容
+    if (!row.isConnected) return;
     row.remove();
+    if (!favoritesOpen) return;
 
-    if (remaining.length === 0) {
+    const remainingCount = favorites.read().length;
+    if (remainingCount === 0 && favoritesList.children.length === 0) {
       favoritesList.innerHTML = '';
       containerControl.hideContainer(favoritesContainer, () => {
         if (favoritesOpen) showNotice('暂无收藏歌曲');
@@ -1245,7 +1277,7 @@ function removeFavoriteRow(id) {
     const count = favoritesContainer.querySelector('.result-count');
     if (!count) return;
 
-    count.textContent = `共有 ${remaining.length} 首收藏歌曲`;
+    count.textContent = `共有 ${remainingCount} 首收藏歌曲`;
     count.style.transition = 'transform 0.3s, background-color 0.3s';
     count.style.transform = 'scale(1.05)';
     count.style.backgroundColor = 'rgba(66, 133, 244, 0.1)';
@@ -1674,7 +1706,7 @@ function initMainPage() {
   favoritesList.addEventListener('click', e => {
     const button = e.target.closest('button');
     const id = button?.dataset.songId;
-    if (!id) return;
+    if (!id || button.closest('.result-item')?.dataset.removing) return;
 
     if (button.classList.contains('remove-button')) {
       removeFavoriteRow(id);
