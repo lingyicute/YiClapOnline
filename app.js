@@ -2220,6 +2220,21 @@ function formatSize(bytes) {
 const downloadTasks = new Map();
 
 /**
+ * 从音频 URL 的路径文件名中提取扩展名（避免把域名后缀如 .net 误当扩展名，也兼容 #hash）
+ * @param {string} url
+ * @returns {string}
+ */
+function getAudioExt(url) {
+  try {
+    const pathname = new URL(url).pathname;
+    const file = pathname.slice(pathname.lastIndexOf('/') + 1);
+    const m = /\.([a-z0-9]{2,5})$/i.exec(file);
+    if (m) return m[1].toLowerCase();
+  } catch {}
+  return 'mp3';
+}
+
+/**
  * 无感唤起下载：fetch 音频为 Blob 后通过 <a download> 在当前页触发下载，不打开新页面/新标签页。
  * 依赖音频 CDN 的 CORS（已确认返回 Access-Control-Allow-Origin: *）。
  * @param {string} url
@@ -2296,7 +2311,8 @@ async function seamlessDownload(url, filename, onProgress, expectedSize) {
         }
       }
       notify(100, 'downloading');
-      blob = new Blob(chunks);
+      const mime = resp.headers.get('content-type') || 'application/octet-stream';
+      blob = new Blob(chunks, { type: mime });
     } else {
       blob = await resp.blob();
       notify(100, 'downloading');
@@ -2323,7 +2339,7 @@ async function seamlessDownload(url, filename, onProgress, expectedSize) {
 }
 
 /** 在下载弹窗里追加一行（某音质 + 大小 + 下载按钮） */
-function renderDownloadRow(list, item, safeTitle) {
+function renderDownloadRow(list, item, safeTitle, { before = null, registerCleanup } = {}) {
   const row = document.createElement('div');
   row.className = 'download-row';
 
@@ -2344,17 +2360,34 @@ function renderDownloadRow(list, item, safeTitle) {
   dlBtn.className = 'download-row-btn';
   dlBtn.textContent = '下载';
 
+  let resetTimer = null;
+  const clearResetTimer = () => {
+    if (resetTimer !== null) {
+      clearTimeout(resetTimer);
+      resetTimer = null;
+    }
+  };
+
   const applyStatus = (percent, status) => {
+    if (!dlBtn.isConnected) {
+      clearResetTimer();
+      const task = downloadTasks.get(item.url);
+      if (task) task.listeners.delete(applyStatus);
+      return;
+    }
     if (status === 'downloading') {
+      clearResetTimer();
       dlBtn.disabled = true;
       dlBtn.classList.remove('download-success', 'download-error-btn');
       dlBtn.classList.add('downloading');
       dlBtn.textContent = `下载中...${percent}%`;
     } else if (status === 'completed') {
+      clearResetTimer();
       dlBtn.classList.remove('downloading', 'download-error-btn');
       dlBtn.classList.add('download-success');
       dlBtn.textContent = '下载完成';
-      setTimeout(() => {
+      resetTimer = setTimeout(() => {
+        resetTimer = null;
         if (dlBtn && dlBtn.isConnected) {
           dlBtn.disabled = false;
           dlBtn.classList.remove('download-success');
@@ -2362,10 +2395,12 @@ function renderDownloadRow(list, item, safeTitle) {
         }
       }, 3000);
     } else if (status === 'error') {
+      clearResetTimer();
       dlBtn.classList.remove('downloading', 'download-success');
       dlBtn.classList.add('download-error-btn');
       dlBtn.textContent = '下载失败';
-      setTimeout(() => {
+      resetTimer = setTimeout(() => {
+        resetTimer = null;
         if (dlBtn && dlBtn.isConnected) {
           dlBtn.disabled = false;
           dlBtn.classList.remove('download-error-btn');
@@ -2374,6 +2409,14 @@ function renderDownloadRow(list, item, safeTitle) {
       }, 3000);
     }
   };
+
+  if (typeof registerCleanup === 'function') {
+    registerCleanup(() => {
+      clearResetTimer();
+      const task = downloadTasks.get(item.url);
+      if (task) task.listeners.delete(applyStatus);
+    });
+  }
 
   // 检查该音频直链是否已有进行中的下载任务（例如关闭弹窗后再次打开）
   const ongoingTask = downloadTasks.get(item.url);
@@ -2384,17 +2427,22 @@ function renderDownloadRow(list, item, safeTitle) {
 
   dlBtn.addEventListener('click', () => {
     if (dlBtn.disabled) return;
+    clearResetTimer();
     // 点击后立即禁止再点击、改变颜色、显示初始进度 0%
     dlBtn.disabled = true;
     dlBtn.classList.add('downloading');
     dlBtn.textContent = '下载中...0%';
 
-    const ext = (item.url.split('?')[0].match(/\.(\w+)$/) || [, 'mp3'])[1];
+    const ext = getAudioExt(item.url);
     seamlessDownload(item.url, `${safeTitle} (${item.label}).${ext}`, applyStatus, item.size);
   });
   row.appendChild(dlBtn);
 
-  list.appendChild(row);
+  if (before && before.parentNode === list) {
+    list.insertBefore(row, before);
+  } else {
+    list.appendChild(row);
+  }
 }
 
 /**
@@ -2407,36 +2455,41 @@ async function openDownloadModal() {
   const modal = document.getElementById('downloadModal');
   const overlay = document.getElementById('downloadOverlay');
   const list = document.getElementById('downloadList');
-  if (!modal || !overlay || !list || !currentSong?.id) return;
+  const closeBtn = document.getElementById('downloadClose');
+  if (!modal || !overlay || !list || !closeBtn || !currentSong?.id) return;
   if (modal.classList.contains('active')) return;
 
   // 关掉再打开后，上一次还没返回的解析请求不能再往新弹窗里追加行(会出现重复行)，
   // 弹窗关闭后也不必再把剩下的音质解析完
   const seq = ++downloadModalSeq;
   const stale = () => seq !== downloadModalSeq;
+  const cleanups = [];
+  const registerCleanup = fn => cleanups.push(fn);
 
-  const safeTitle = (currentSong.title || 'music').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'music';
+  const safeTitle = sanitizeStem(currentSong.title || 'music');
   list.innerHTML = '<div class="download-loading">正在解析标准音质…</div>';
 
   const close = () => {
     downloadModalSeq++;
+    cleanups.splice(0).forEach(fn => fn());
     overlay.classList.remove('active');
     modal.classList.remove('active');
     document.removeEventListener('keydown', onKeydown);
   };
   const onKeydown = e => { if (e.key === 'Escape') close(); };
-  document.getElementById('downloadClose').onclick = close;
+  closeBtn.onclick = close;
   overlay.onclick = close;
   document.addEventListener('keydown', onKeydown);
   overlay.classList.add('active');
   modal.classList.add('active');
+  closeBtn.focus();
 
   // 先解析并展示标准音质
   try {
     const std = await musicSource.getTrackUrl(currentSong.id, 'standard');
     if (stale()) return;
     list.querySelector('.download-loading')?.remove();
-    renderDownloadRow(list, { label: '标准音质', url: std.url, size: std.size }, safeTitle);
+    renderDownloadRow(list, { label: '标准音质', url: std.url, size: std.size }, safeTitle, { registerCleanup });
   } catch (e) {
     if (stale()) return;
     list.querySelector('.download-loading')?.remove();
@@ -2458,7 +2511,10 @@ async function openDownloadModal() {
       try {
         const r = await musicSource.getTrackUrl(currentSong.id, q.level);
         if (stale()) return;
-        renderDownloadRow(list, { label: q.label, url: r.url, size: r.size }, safeTitle);
+        renderDownloadRow(list, { label: q.label, url: r.url, size: r.size }, safeTitle, {
+          before: moreBtn,
+          registerCleanup,
+        });
       } catch {
         if (stale()) return;
         const row = document.createElement('div');
@@ -2470,7 +2526,7 @@ async function openDownloadModal() {
         warn.className = 'download-warn';
         warn.textContent = '解析失败';
         row.append(label, warn);
-        list.appendChild(row);
+        list.insertBefore(row, moreBtn);
       }
     }
     moreBtn.remove();
