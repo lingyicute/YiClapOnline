@@ -1797,6 +1797,14 @@ function initMainPage() {
     if (isModalActive('updateModal') || isModalActive('qualityModal')) return;
     if (playerContainer.classList.contains('active')) closePlayer();
   });
+
+  // 播放器 iframe 获得焦点后按键不会冒泡到父页，通过同源消息响应 iframe 内按 Esc
+  window.addEventListener('message', e => {
+    if (e.origin !== location.origin || e.source !== playerFrame.contentWindow) return;
+    if (e.data?.type !== 'yiclape:close-player') return;
+    if (isModalActive('updateModal') || isModalActive('qualityModal')) return;
+    if (playerContainer.classList.contains('active')) closePlayer();
+  });
 }
 
 /* ==========================================================================
@@ -1957,16 +1965,19 @@ function togglePlay() {
 function setVolumeIcon() {
   const icon = volumeBtn?.querySelector('.material-symbols-rounded');
   if (!icon) return;
-  const muted = audioSource.volume <= 0;
+  const muted = audioSource.muted || audioSource.volume <= 0;
   icon.textContent = muted ? 'volume_off' : 'volume_up';
   volumeBtn.setAttribute('aria-label', muted ? '取消静音' : '静音');
+  volumeBtn.setAttribute('aria-pressed', String(muted));
 }
 
 function changeVolume() {
   if (!volumeRange || !volumeBtn) return;
-  audioSource.volume = Number(volumeRange.value);
-  muteState = audioSource.volume <= 0;
-  if (!muteState) savedVolume = audioSource.volume;
+  const next = Number(volumeRange.value);
+  audioSource.volume = next;
+  muteState = next <= 0;
+  audioSource.muted = muteState;
+  if (!muteState) savedVolume = next;
   setVolumeIcon();
 }
 
@@ -1975,8 +1986,11 @@ function muteVolume() {
 
   muteState = !muteState;
   // 取消静音恢复之前的音量，而非直接跳到最大；若之前保存的就是 0，则恢复到最大
-  audioSource.volume = muteState ? 0 : (savedVolume > 0 ? savedVolume : 1);
-  volumeRange.value = String(audioSource.volume);
+  const next = muteState ? 0 : (savedVolume > 0 ? savedVolume : 1);
+  // iPadOS Safari 上 audio.volume 只读，同步设置 audio.muted 才能真正静音
+  audioSource.muted = muteState;
+  audioSource.volume = next;
+  volumeRange.value = String(next);
   setVolumeIcon();
   updateRangeFill();
 }
@@ -1999,6 +2013,7 @@ function buildVolumeControl(shouldBuild) {
     // 窄屏下没有任何 UI 能取消静音，别让声音悄悄卡在 0；恢复到用户上次的音量
     if (muteState) {
       muteState = false;
+      audioSource.muted = false;
       audioSource.volume = savedVolume > 0 ? savedVolume : 1;
     }
     return;
@@ -2034,6 +2049,7 @@ function buildVolumeControl(shouldBuild) {
 
   volumeRange = slider;
   volumeBtn = button;
+  audioSource.muted = muteState;
   audioSource.volume = Number(slider.value);
   setVolumeIcon(); // 让图标与恢复后的音量一致（如静音状态下显示 volume_off）
 
@@ -2515,6 +2531,12 @@ function initPlayerPage() {
 
   // 进度条：拖动过程中只更新显示，松手(change)时才真正跳转，避免拖动时反复触发 seek 与 timeupdate 打架
   playerSeekRange?.addEventListener('input', () => {
+    if (!Number.isFinite(audioSource.duration) || audioSource.duration <= 0) {
+      playerSeekRange.value = '0';
+      if (playerRunningTime) playerRunningTime.textContent = getTimecode(0);
+      updateRangeFill();
+      return;
+    }
     isSeeking = true;
     updateRangeFill();
     if (playerRunningTime) {
@@ -2523,11 +2545,18 @@ function initPlayerPage() {
   });
   const commitSeek = () => {
     isSeeking = false;
+    const duration = audioSource.duration;
     const target = Number(playerSeekRange.value);
-    if (!Number.isFinite(target) || !Number.isFinite(audioSource.duration)) return;
+    if (!Number.isFinite(target) || !Number.isFinite(duration) || duration <= 0) {
+      playerSeekRange.value = '0';
+      if (playerRunningTime) playerRunningTime.textContent = getTimecode(0);
+      updateRangeFill();
+      return;
+    }
+    const clamped = Math.min(duration, Math.max(0, target));
     // 松手兜底和随后的 change 都会走到这里，已经在目标位置就不重复 seek
-    if (Math.abs(audioSource.currentTime - target) < 0.01) return;
-    audioSource.currentTime = target;
+    if (Math.abs(audioSource.currentTime - clamped) < 0.01) return;
+    audioSource.currentTime = clamped;
   };
   playerSeekRange?.addEventListener('change', commitSeek);
   // 拖动后又回到起始值时浏览器不会触发 change，isSeeking 会一直卡在 true，
@@ -2561,8 +2590,20 @@ function initPlayerPage() {
   // 主页在收藏列表里删掉了正在播放的这首歌时，爱心要跟着灭掉
   window.addEventListener('storage', event => {
     if (event.storageArea !== localStorage) return;
+    if (event.key === QUALITY_KEY || event.key === null) {
+      qualityFallback = null;
+    }
     if ((event.key === FAVORITES_KEY || event.key === null) && currentSong?.id) {
       updateFavoriteButtonUI(favorites.has(currentSong.id));
+    }
+  });
+
+  // 焦点位于播放器 iframe 内时按 Esc 通知主页关闭播放器（下载弹窗开着时交给弹窗处理）
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (isModalActive('downloadModal')) return;
+    if (window.parent !== window && location.origin !== 'null') {
+      window.parent.postMessage({ type: 'yiclape:close-player' }, location.origin);
     }
   });
 
