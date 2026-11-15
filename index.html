@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YiClapOnline</title>
   <link rel="shortcut icon" href="./assets/logo.svg" type="image/svg+xml">
-  <!-- 字体预加载：样式表是异步插入的，不预加载的话 Nebulove 要等 update.json -> style.css 两跳之后才开始下，整页字体会跳一下 -->
+  <!-- 字体预加载：样式表是异步插入的，不预加载的话字体要等 update.json -> style.css 两跳之后才开始下，首屏会闪烁 -->
   <link rel="preload" href="./assets/Nebulove.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="./assets/pacifico.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="./assets/MaterialSymbols.woff2" as="font" type="font/woff2" crossorigin>
   <!-- style.css / app.js 不在这里静态引用，由下方 loader 按 update.json 的版本号带 ?v= 加载 -->
   <!-- 图标 -->
