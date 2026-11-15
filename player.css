@@ -1093,13 +1093,25 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   color: var(--primary);
 }
 
-.download-more-btn:hover {
+.download-more-btn:hover:not(:disabled) {
   background: rgba(66, 133, 244, 0.08);
 }
 
 .download-more-btn:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+@media (max-width: 574.98px) {
+  .download-modal {
+    padding: 1.8rem;
+  }
+
+  .download-row {
+    flex-wrap: wrap;
+    row-gap: 0.6rem;
+    border-radius: 16px;
+  }
 }
 
 .download-loading,
