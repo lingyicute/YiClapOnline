@@ -2214,6 +2214,8 @@ function renderDownloadRow(list, item, safeTitle) {
  * 下载弹窗：先展示标准音质及其大小，并提供“继续解析 VIP 和 SVIP 音质”按钮；
  * 点击后逐个解析更高音质并呈现大小，每行可无感下载。
  */
+let downloadModalSeq = 0; // 弹窗每开/关一次就 +1，用来识别"上一次弹窗遗留的异步解析"
+
 async function openDownloadModal() {
   const modal = document.getElementById('downloadModal');
   const overlay = document.getElementById('downloadOverlay');
@@ -2221,10 +2223,16 @@ async function openDownloadModal() {
   if (!modal || !overlay || !list || !currentSong?.id) return;
   if (modal.classList.contains('active')) return;
 
+  // 关掉再打开后，上一次还没返回的解析请求不能再往新弹窗里追加行(会出现重复行)，
+  // 弹窗关闭后也不必再把剩下的音质解析完
+  const seq = ++downloadModalSeq;
+  const stale = () => seq !== downloadModalSeq;
+
   const safeTitle = (currentSong.title || 'music').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'music';
   list.innerHTML = '<div class="download-loading">正在解析标准音质…</div>';
 
   const close = () => {
+    downloadModalSeq++;
     overlay.classList.remove('active');
     modal.classList.remove('active');
     document.removeEventListener('keydown', onKeydown);
@@ -2239,9 +2247,11 @@ async function openDownloadModal() {
   // 先解析并展示标准音质
   try {
     const std = await musicSource.getTrackUrl(currentSong.id, 'standard');
+    if (stale()) return;
     list.querySelector('.download-loading')?.remove();
     renderDownloadRow(list, { label: '标准音质', url: std.url, size: std.size }, safeTitle);
   } catch (e) {
+    if (stale()) return;
     list.querySelector('.download-loading')?.remove();
     const err = document.createElement('div');
     err.className = 'download-error';
@@ -2260,8 +2270,10 @@ async function openDownloadModal() {
     for (const q of QUALITY_LEVELS.filter(q => q.level !== 'standard')) {
       try {
         const r = await musicSource.getTrackUrl(currentSong.id, q.level);
+        if (stale()) return;
         renderDownloadRow(list, { label: q.label, url: r.url, size: r.size }, safeTitle);
       } catch {
+        if (stale()) return;
         const row = document.createElement('div');
         row.className = 'download-row download-row--error';
         const label = document.createElement('span');
