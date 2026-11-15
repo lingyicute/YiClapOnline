@@ -97,11 +97,14 @@ jobs:
             echo '| --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
           import json, pathlib
+          def esc(s):
+              return str(s).replace('\r\n', '\n').replace('\r', '\n').replace('|', '&#124;').replace('\n', '<br>')
           r = json.loads(pathlib.Path('test-results/report.json').read_text(encoding='utf-8'))
           for item in r['results']:
               mark = '🟡SKIP' if item.get('skipped') else ('✅PASS' if item['ok'] else '❌FAIL')
-              detail = str(item['detail'])[:300].replace('|', '\\|').replace('\n', '<br>')
-              print(f"| {item['test']} | {mark} | {detail} |")
+              test = esc(item['test'])
+              detail = esc(str(item['detail'])[:300])
+              print(f"| {test} | {mark} | {detail} |")
           print()
           print(f"- 通过: {r['pass']}，失败: {r['fail']}，跳过: {r.get('skip', 0)}")
           EOF
