@@ -1965,6 +1965,10 @@ async function loadTrack() {
     return;
   }
 
+  // 上报前的去重依赖 musicdb 的 list.txt，与换取直链并行静默预拉取（fire-and-forget）。
+  // 放在 id 检查之后：主页预加载用的隐藏播放器没有 id，不该每次打开主页都白拉一份 list.txt
+  loadMusicdbList();
+
   // getSongUrl 不返回元数据，主页在打开播放器时已把标题/歌手/封面/是否 VIP 通过 URL 带过来
   const meta = {
     title: params.get('title') || '',
@@ -2269,9 +2273,6 @@ async function openDownloadModal() {
 function initPlayerPage() {
   audioSource = new Audio();
   audioSource.preload = 'metadata';
-
-  // 上报前的去重依赖 musicdb 的 list.txt，进播放器页就静默预拉取（fire-and-forget）
-  loadMusicdbList();
 
   playBtn = document.querySelector('[data-play-btn]');
   playerSeekRange = document.querySelector('[data-seek]');
