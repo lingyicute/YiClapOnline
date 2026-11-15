@@ -96,15 +96,15 @@ jobs:
             echo '| 测试项 | 结果 | 说明 |' >> "$GITHUB_STEP_SUMMARY"
             echo '| --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
             python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          r = json.load(open('test-results/report.json', encoding='utf-8'))
+          import json, pathlib
+          r = json.loads(pathlib.Path('test-results/report.json').read_text(encoding='utf-8'))
           for item in r['results']:
               mark = '🟡SKIP' if item.get('skipped') else ('✅PASS' if item['ok'] else '❌FAIL')
-              detail = str(item['detail']).replace('|', '\\|')[:300].replace('\n', '<br>')
+              detail = str(item['detail'])[:300].replace('|', '\\|').replace('\n', '<br>')
               print(f"| {item['test']} | {mark} | {detail} |")
+          print()
+          print(f"- 通过: {r['pass']}，失败: {r['fail']}，跳过: {r.get('skip', 0)}")
           EOF
-            echo '' >> "$GITHUB_STEP_SUMMARY"
-            echo "- 通过: $(python3 -c "import json;print(json.load(open('test-results/report.json',encoding='utf-8'))['pass'])")，失败: $(python3 -c "import json;print(json.load(open('test-results/report.json',encoding='utf-8'))['fail'])")" >> "$GITHUB_STEP_SUMMARY"
           else
             echo '未生成 report.json（测试进程可能提前崩溃）' >> "$GITHUB_STEP_SUMMARY"
           fi
