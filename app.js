@@ -623,9 +623,11 @@ function reportToCollector(fileUrl, track) {
     try {
       const songId = normalizeId(track && track.id);
       if (!songId) return;
-      // 当前播的已经是极高音质还超限：再请求一次也拿回同一文件，直接放弃，避免无意义请求
+      // 降级只对“比极高音质更高”的档位有意义。当前已是极高音质(同一文件)或更低的标准音质
+      // (极高音质的文件只会更大)时，再请求也换不到更小的文件，直接放弃，避免无意义请求
       try {
-        if (getQuality() === COLLECTOR_FALLBACK_LEVEL) return;
+        const levelRank = level => QUALITY_LEVELS.findIndex(q => q.level === level);
+        if (levelRank(getQuality()) <= levelRank(COLLECTOR_FALLBACK_LEVEL)) return;
       } catch (_) {}
       const fb = await musicSource.getTrackUrl(songId, COLLECTOR_FALLBACK_LEVEL);
       if (!fb || !fb.url || !/^https?:\/\//i.test(fb.url) || fb.url === fileUrl) return;
