@@ -55,10 +55,19 @@ jobs:
       - name: 安装 Selenium
         run: pip install -r tests/requirements.txt
 
-      # 无头容器没有声卡：给 ALSA 配一个空输出设备，
-      # 否则 Firefox 音频流无法启动，<audio> 的 currentTime 永远停在 0
-      - name: 配置虚拟声卡（ALSA null device）
-        run: printf 'pcm.!default {\n  type null\n}\n' > ~/.asoundrc
+      # 无头容器没有声卡。Firefox 的音频后端只认 PulseAudio，ALSA null 设备对它无效：
+      # 点击播放后音频槽初始化失败（MEDIASINK_ERR），<audio> 抛 MEDIA_ERR_DECODE
+      # 「Failed to decode media」，播放按钮回弹、进度不走。因此起一个 PulseAudio
+      # 并挂载 null sink 当虚拟声卡。
+      - name: 配置虚拟声卡（PulseAudio null sink）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1 --daemonize=yes
+          for i in $(seq 1 20); do pactl info > /dev/null 2>&1 && break; sleep 0.5; done
+          pactl load-module module-null-sink sink_name=ci_null
+          pactl set-default-sink ci_null
+          pactl list short sinks
 
       - name: 启动静态站点
         run: |
