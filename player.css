@@ -1008,9 +1008,14 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 }
 
 .download-warn {
+  margin-left: auto;
   font-size: 1.1rem;
-  color: #ffce6b;
+  color: #b8740a; /* 浅色背景上的对比度；与 VIP 提示、音质警告同色系 */
   white-space: nowrap;
+}
+
+:root.dark-theme .download-warn {
+  color: #ffce6b;
 }
 
 .download-row-btn {
