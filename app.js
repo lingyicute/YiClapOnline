@@ -1409,27 +1409,44 @@ const updateControl = {
   resumeDeferred() {
     if (!this._deferred) return;
     this._deferred = false;
-    this.showChangelogIfUpgraded().finally(() => this.checkForUpdate());
+    this.checkStartup();
   },
 
   /**
-   * 拉取线上版本信息。
+   * 启动时先看有没有该展示的更新日志，再复用同一次拉取结果做版本检查，避免连发两次请求
+   */
+  async checkStartup() {
+    const res = await this.showChangelogIfUpgraded();
+    await this.checkForUpdate(res && res.fetched ? res.remote : undefined);
+  },
+
+  /**
+   * 拉取线上版本信息（带超时保护，避免挂起后永久锁死 _checking）。
    * @returns {Promise<{version: string, updateTime?: string, changes?: string[]}|null>}
    */
   async fetchRemote() {
-    // no-store + 时间戳双保险：即便某层代理无视 Cache-Control 也拿不到旧 json
-    const res = await fetch('./update.json?_=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || data.version === undefined || data.version === null) return null;
-    return { ...data, version: String(data.version) };
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
+    try {
+      // no-store + 时间戳双保险：即便某层代理无视 Cache-Control 也拿不到旧 json
+      const res = await fetch('./update.json?_=' + Date.now(), {
+        cache: 'no-store',
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || data.version === undefined || data.version === null) return null;
+      return { ...data, version: String(data.version) };
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
   },
 
-  async checkForUpdate() {
+  async checkForUpdate(prefetched) {
     if (this._checking) return; // visibilitychange 与定时器可能同时触发
     this._checking = true;
     try {
-      const remote = await this.fetchRemote();
+      const remote = prefetched !== undefined ? prefetched : await this.fetchRemote();
       if (!remote) return;
 
       // 严格按"不相等"判断而不是"大于"：万一需要回滚到旧版本，用户同样应该被切过去
@@ -1549,27 +1566,30 @@ const updateControl = {
    */
   async showChangelogIfUpgraded() {
     let seen = null;
-    try { seen = localStorage.getItem(CHANGELOG_SEEN_KEY); } catch { return; }
+    try { seen = localStorage.getItem(CHANGELOG_SEEN_KEY); } catch { return { fetched: false }; }
 
     const markSeen = () => { try { localStorage.setItem(CHANGELOG_SEEN_KEY, APP_VERSION); } catch {} };
 
-    if (seen === null) { markSeen(); return; }       // 新用户
-    if (seen === APP_VERSION) return;                 // 已看过
+    if (seen === null) { markSeen(); return { fetched: false }; }       // 新用户
+    if (seen === APP_VERSION) return { fetched: false };                 // 已看过
 
     try {
       const remote = await this.fetchRemote();
       // 只展示与当前代码同版本的日志；若线上已经又发了新版，交给 checkForUpdate 提示刷新即可
-      if (!remote || remote.version !== APP_VERSION) return;
-      this.showUpdateModal(remote, { mode: 'changelog', onClose: markSeen });
+      if (remote && remote.version === APP_VERSION) {
+        this.showUpdateModal(remote, { mode: 'changelog', onClose: markSeen });
+      }
+      return { fetched: true, remote };
     } catch (e) {
       console.error('读取更新日志出错:', e);
+      return { fetched: true, remote: null };
     }
   },
 
   init() {
     this.stripReloadParam();
     // 先看有没有该展示的更新日志，再开始例行的新版本检查(两者互斥，见 showUpdateModal)
-    setTimeout(() => this.showChangelogIfUpgraded().finally(() => this.checkForUpdate()), 800);
+    setTimeout(() => this.checkStartup(), 800);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') this.checkForUpdate();
     });
