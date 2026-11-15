@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 json_ver="$(python3 -c "import json;print(json.load(open('update.json',encoding='utf-8'))['version'])")"
-js_ver="$(grep -oE "^const APP_VERSION = '[0-9]+';" app.js | grep -oE '[0-9]+')"
+js_ver="$(grep -oE "^const APP_VERSION = '[0-9]+';" app.js | grep -oE '[0-9]+' || true)"
 
 if [[ -z "$js_ver" ]]; then
   echo "✗ app.js 里找不到 APP_VERSION" >&2
