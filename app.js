@@ -261,6 +261,9 @@ const musicSource = {
   /** 数据源后端基地址 */
   _baseUrl: 'https://nextmusic.toubiec.cn/api',
 
+  /** 单次请求超时时间（毫秒），防止上游无响应导致界面永久卡在加载中 */
+  _timeoutMs: 15000,
+
   /**
    * 在 112.114.x.x ~ 112.117.x.x 之间随机生成一个 ip，供接口反爬校验使用
    */
@@ -272,7 +275,7 @@ const musicSource = {
   },
 
   /**
-   * 统一封装对数据源后端的 POST 请求：自动加随机 ip、处理网络/HTTP/业务码错误。
+   * 统一封装对数据源后端的 POST 请求：自动加随机 ip、超时保护及网络/HTTP/业务码错误处理。
    *
    * @returns {Promise<any>} 接口返回的 data 字段
    */
@@ -280,6 +283,8 @@ const musicSource = {
     let lastError;
     // 最多两次：第一次失败（账号轮换导致的偶发 404 等）就重试一次
     for (let attempt = 0; attempt < 2; attempt++) {
+      const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), this._timeoutMs) : null;
       try {
         let res;
         try {
@@ -289,10 +294,14 @@ const musicSource = {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ ...body, ip: this._randomIp() }),
+            ...(ctrl ? { signal: ctrl.signal } : {}),
           });
-        } catch {
-          // 网络层失败：通常是临时的，可重试
-          throw Object.assign(new Error('网络请求失败，请检查网络连接后重试'), { retryable: true });
+        } catch (err) {
+          // 网络层失败或超时：通常是临时的，可重试
+          const msg = err?.name === 'AbortError'
+            ? '请求超时，请稍后重试'
+            : '网络请求失败，请检查网络连接后重试';
+          throw Object.assign(new Error(msg), { retryable: true });
         }
         if (!res.ok) throw Object.assign(new Error(`请求失败：HTTP ${res.status}`), { retryable: true });
         let data;
@@ -314,6 +323,8 @@ const musicSource = {
         lastError = error;
         // 非可重试错误，或已经是第二次尝试：直接抛出
         if (!error.retryable || attempt === 1) throw error;
+      } finally {
+        if (timer !== null) clearTimeout(timer);
       }
     }
     throw lastError;
@@ -336,13 +347,24 @@ const musicSource = {
     });
     // 后端偶发返回结构异常时按空结果处理，避免上层直接报 TypeError
     if (!data || !Array.isArray(data.songs)) return [];
-    return data.songs.map(song => ({
-      id: String(song.id),
-      title: song.name || '未知歌曲',
-      artist: song.singer || '未知歌手',
-      cover: song.picimg || '',
-      vip: song.free === false,
-    }));
+    const items = [];
+    for (const song of data.songs) {
+      if (!song) continue;
+      const id = normalizeId(song.id);
+      if (!id) continue;
+      // 网易云封面 CDN 原样支持 HTTPS，升级协议避免 HTTPS 部署下的混合内容拦截
+      const cover = typeof song.picimg === 'string'
+        ? song.picimg.replace(/^http:\/\/(p\d+\.music\.126\.net\/)/i, 'https://$1')
+        : '';
+      items.push({
+        id,
+        title: song.name || '未知歌曲',
+        artist: song.singer || '未知歌手',
+        cover,
+        vip: song.free === false,
+      });
+    }
+    return items;
   },
 
   /**
