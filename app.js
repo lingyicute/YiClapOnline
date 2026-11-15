@@ -2325,12 +2325,19 @@ function initPlayerPage() {
       playerRunningTime.textContent = getTimecode(playerSeekRange.value);
     }
   });
-  playerSeekRange?.addEventListener('change', () => {
+  const commitSeek = () => {
     isSeeking = false;
     const target = Number(playerSeekRange.value);
-    if (Number.isFinite(target) && Number.isFinite(audioSource.duration)) {
-      audioSource.currentTime = target;
-    }
+    if (!Number.isFinite(target) || !Number.isFinite(audioSource.duration)) return;
+    // 松手兜底和随后的 change 都会走到这里，已经在目标位置就不重复 seek
+    if (Math.abs(audioSource.currentTime - target) < 0.01) return;
+    audioSource.currentTime = target;
+  };
+  playerSeekRange?.addEventListener('change', commitSeek);
+  // 拖动后又回到起始值时浏览器不会触发 change，isSeeking 会一直卡在 true，
+  // 进度条从此不再跟随播放。松手 / 失焦时若仍处于拖动状态，就在这里收尾
+  ['pointerup', 'pointercancel', 'blur'].forEach(type => {
+    playerSeekRange?.addEventListener(type, () => { if (isSeeking) commitSeek(); });
   });
 
   // 下载按钮：打开下载弹窗（音质选择 + 无感下载，不打开新页面）
