@@ -813,9 +813,17 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   opacity: 0.8;
 }
 
-/* 深色主题下给滑块加一点阴影(颜色仍走基础的 --primary) */
+/* 深色主题下给滑块加一点阴影，同时保留悬停与键盘焦点光环不被更高权重覆盖 */
 :root.dark-theme .range::-webkit-slider-thumb {
   box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
+}
+
+:root.dark-theme .range::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 12px var(--on-surface-variant-hover);
+}
+
+:root.dark-theme .range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 12px var(--on-surface-variant-focus);
 }
 /*-----------------------------------*\
   #LOADING OVERLAY
