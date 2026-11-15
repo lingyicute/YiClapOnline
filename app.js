@@ -2041,14 +2041,26 @@ const downloadTasks = new Map();
  * @param {number} [expectedSize] - 预估文件字节大小，用于响应头缺失 Content-Length 时的兜底
  */
 async function seamlessDownload(url, filename, onProgress, expectedSize) {
-  let task = downloadTasks.get(url);
-  if (!task) {
-    task = { percent: 0, status: 'downloading', listeners: new Set() };
-    downloadTasks.set(url, task);
+  const running = downloadTasks.get(url);
+  if (running && running.status === 'downloading') {
+    // 同一直链已有下载在进行(例如两个音质解析出同一个文件)：只挂监听，不重复下载
+    if (typeof onProgress === 'function') {
+      running.listeners.add(onProgress);
+      try { onProgress(running.percent, 'downloading'); } catch {}
+    }
+    return;
   }
+
+  // 每次下载都新建任务，不复用上次遗留的已完成/失败任务及其过期监听器
+  const task = { percent: 0, status: 'downloading', listeners: new Set() };
+  downloadTasks.set(url, task);
   if (typeof onProgress === 'function') {
     task.listeners.add(onProgress);
   }
+  // 只清理自己：5 秒内重新下载时，旧任务的定时器不能把新任务从表里删掉
+  const forgetLater = () => setTimeout(() => {
+    if (downloadTasks.get(url) === task) downloadTasks.delete(url);
+  }, 5000);
 
   const notify = (percent, status) => {
     task.percent = percent;
@@ -2115,11 +2127,11 @@ async function seamlessDownload(url, filename, onProgress, expectedSize) {
     // 稍作停顿，让用户能看清 100% 进度
     await new Promise(r => setTimeout(r, 400));
     notify(100, 'completed');
-    setTimeout(() => downloadTasks.delete(url), 5000);
+    forgetLater();
   } catch (e) {
     console.warn('下载失败（可能为跨域或网络限制）:', e);
     notify(task.percent, 'error');
-    setTimeout(() => downloadTasks.delete(url), 5000);
+    forgetLater();
   }
 }
 
