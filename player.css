@@ -19,7 +19,8 @@
   --charcoal: hsl(203, 9%, 85%);
   --silver-sand: hsl(208, 12%, 30%);
   --light-sky-blue: hsl(200, 100%, 50%);
-  --prussian-blue: hsl(196, 80%, 90%);
+  /* 保持深海军蓝，确保 --on-primary 在亮蓝色按钮上满足 WCAG AA 对比度 */
+  --prussian-blue: hsl(196, 100%, 14%);
   --black: hsl(0, 0%, 100%);
   --light-sky-blue_a8: rgba(0, 120, 212, 0.08);
   --light-sky-blue_a12: rgba(0, 120, 212, 0.12);
@@ -288,8 +289,8 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   background-size: cover;
   background-repeat: no-repeat;
   padding: var(--padding);
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   text-align: left;
@@ -529,7 +530,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   margin-block-start: -5px;
   border-radius: var(--radius-pill);
   border: none;
-  box-shadow: none;
 }
 
 .volume input[type="range"]::-moz-range-thumb {
@@ -539,19 +539,11 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   height: 16px;
   border-radius: var(--radius-pill);
   border: none;
-  box-shadow: none;
 }
 
 /*-----------------------------------*\
   #MEDIA QUERIES
 \*-----------------------------------*/
-
-/**
- * responsive for large than 575px screen
- */
-@media (min-width: 575px) {
-  .player .container { max-width: 540px; }
-}
 
 /* 中等屏幕布局 (575px-992px) */
 @media (min-width: 575px) and (max-width: 991.98px) {
@@ -688,7 +680,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
     --padding: 48px;
     flex-direction: row;
     height: auto;
-    min-height: 100vh;
+    min-height: 100%;
     align-items: center;
     backdrop-filter: blur(90px) saturate(1.2);
     -webkit-backdrop-filter: blur(90px) saturate(1.2);
@@ -700,6 +692,7 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   
   .player .container {
     max-width: 1200px;
+    margin: 0 auto;
     flex-direction: row;
     gap: 48px;
     max-height: 500px;
@@ -876,7 +869,9 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-top: 16px;
+  max-width: 100%;
+  /* 上方 artist 已有 20px 下边距，这里不再额外加间距，避免空隙过大 */
+  margin-top: 0;
   padding: 8px 16px;
   border-radius: var(--radius-pill);
   font-size: 1.4rem;
@@ -886,8 +881,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   background: linear-gradient(135deg, rgba(255, 193, 7, 0.14), rgba(247, 151, 30, 0.14));
   border: 1px solid rgba(247, 151, 30, 0.4);
   backdrop-filter: blur(4px);
-  /* 上方 artist 已有 20px 下边距，这里不再额外加间距，避免空隙过大 */
-  margin-top: 0;
   animation: vip-banner-in 0.45s ease both;
 }
 
@@ -896,13 +889,12 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   display: none;
 }
 
-.vip-parse-banner .material-symbols-rounded {
-  font-size: 1.9rem;
-  color: #f7971e;
+.vip-parse-banner svg {
   flex-shrink: 0;
 }
 
 .vip-parse-text {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -912,10 +904,6 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   color: #ffce6b;
   background: linear-gradient(135deg, rgba(255, 193, 7, 0.18), rgba(247, 151, 30, 0.18));
   border-color: rgba(247, 151, 30, 0.55);
-}
-
-:root.dark-theme .vip-parse-banner .material-symbols-rounded {
-  color: #ffb347;
 }
 
 @keyframes vip-banner-in {
@@ -999,17 +987,16 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   font-weight: var(--fw-500);
   font-size: 1.4rem;
   white-space: nowrap;
+  margin-right: auto;
 }
 
 .download-size {
   font-size: 1.3rem;
   opacity: 0.7;
-  margin-left: auto;
   white-space: nowrap;
 }
 
 .download-warn {
-  margin-left: auto;
   font-size: 1.1rem;
   color: #b8740a; /* 浅色背景上的对比度；与 VIP 提示、音质警告同色系 */
   white-space: nowrap;
@@ -1036,6 +1023,13 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
 
 .download-row-btn:hover:not(:disabled) {
   opacity: 0.9;
+}
+
+.download-row-btn:focus-visible,
+.download-more-btn:focus-visible,
+#downloadClose:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .download-row-btn:disabled,
@@ -1082,14 +1076,19 @@ body:hover::-webkit-scrollbar-thumb { background-color: var(--surface-variant); 
   align-self: flex-start;
   margin-top: 0.4rem;
   padding: 1rem 1.6rem;
-  border: 1px solid var(--primary);
+  border: 1px solid #0066b3;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--primary);
+  color: #0066b3;
   font-size: 1.4rem;
   font-family: inherit;
   cursor: pointer;
   transition: opacity 0.2s ease;
+}
+
+:root.dark-theme .download-more-btn {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .download-more-btn:hover {
