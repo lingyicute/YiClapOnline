@@ -112,8 +112,13 @@ def open_playable_song(limit=8):
         artist:x.dataset.artist, vip:x.dataset.vip, cover:x.dataset.cover}}))""")
     b.switch_to.default_content()
     for cand in cands:
-        b.execute_script(
-            "document.querySelector('.play-button[data-song-id=\"%s\"]').click()" % cand["id"])
+        clicked = b.execute_script("""
+            var btn = [...document.querySelectorAll('#results-list .play-button')]
+              .find(el => el.dataset.songId === arguments[0]);
+            if (btn) btn.click();
+            return !!btn;""", cand["id"])
+        if not clicked:
+            continue
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('player-container').classList.contains('active')"))
         src = b.execute_script("return document.getElementById('player-frame').src")
@@ -121,12 +126,12 @@ def open_playable_song(limit=8):
         try:
             wait.until(lambda d: d.execute_script(
                 "var o=document.getElementById('loadingOverlay');"
-                "return !o || o.classList.contains('hidden')"))
+                "return !!(o && o.classList.contains('hidden'))"))
         except Exception:
             pass
-        title = b.execute_script(
-            "var t=document.querySelector('[data-title]'); return t ? t.textContent : ''")
-        if '获取歌曲失败' not in title and '播放失败' not in title:
+        title = (b.execute_script(
+            "var t=document.querySelector('[data-title]'); return t ? t.textContent.trim() : ''") or "")
+        if title and title != '加载中...' and '获取歌曲失败' not in title and '播放失败' not in title:
             cand["_src"] = src
             return cand
         b.switch_to.default_content()
@@ -257,7 +262,11 @@ def _():
     b.find_element(By.CSS_SELECTOR, "[data-favorite]").click()
     time.sleep(0.5)
     favs = b.execute_script("return localStorage.getItem('yiclape:favorites')")
-    rec("播放器内收藏成功", bool(favs and favs != "[]"), (favs or "")[:160])
+    try:
+        fav_items = json.loads(favs or "{}").get("items", [])
+    except Exception:
+        fav_items = []
+    rec("播放器内收藏成功", any(str(i.get("id")) == str(first["id"]) for i in fav_items), (favs or "")[:160])
     b.switch_to.default_content()
     shot(b, "04-player-overlay.png")
 
@@ -313,7 +322,7 @@ def _():
     time.sleep(0.5)
     saved = b.execute_script("return localStorage.getItem('yiclape:audio-quality')")
     closed = b.execute_script("return !document.getElementById('qualityModal').classList.contains('active')")
-    rec("切换音质并保存", closed and saved is not None, f"saved={saved}")
+    rec("切换音质并保存", closed and saved == "exhigh", f"saved={saved}")
     b.execute_script("localStorage.setItem('yiclape:audio-quality','standard')")
 
 
@@ -368,8 +377,10 @@ def _():
 @net
 def _():
     if b.execute_script("return document.querySelectorAll('#results-list .result-item').length") == 0:
-        b.find_element(By.ID, "search-input").send_keys("陈奕迅")
-        b.find_element(By.ID, "search-input").send_keys(Keys.ENTER)
+        inp = b.find_element(By.ID, "search-input")
+        inp.clear()
+        inp.send_keys("陈奕迅")
+        inp.send_keys(Keys.ENTER)
         poll_until(lambda: b.execute_script(
             "return document.querySelectorAll('#results-list .result-item').length>0"), timeout=30)
     song = open_playable_song()
@@ -419,7 +430,7 @@ def _():
     b.switch_to.default_content()
     b.get(BASE + "/player.html")
     hidden = poll_until(lambda: b.execute_script(
-        "var o=document.getElementById('loadingOverlay'); return !o || o.classList.contains('hidden')"), timeout=15)
+        "var o=document.getElementById('loadingOverlay'); return !!(o && o.classList.contains('hidden'))"), timeout=15)
     title = b.execute_script("return document.querySelector('[data-title]')?.textContent || ''")
     artist = b.execute_script("return document.querySelector('[data-artist]')?.textContent || ''")
     shot(b, "09-player-direct.png")

@@ -31,7 +31,6 @@ WebKit 特有的两个注意点：
 """
 import json
 import os
-import re
 import time
 import sys
 import traceback
@@ -59,6 +58,7 @@ try:
     browser = pw.webkit.launch(headless=HEADLESS)
 except Exception as e:
     print(f"无法启动 WebKit：{e}", flush=True)
+    pw.stop()
     sys.exit(2)
 
 # 全新浏览器 profile（localStorage 为空），与 Selenium 版行为一致：
@@ -121,7 +121,6 @@ def open_playable_song(limit=8):
         .slice(0, {limit}).map(x=>({{id:x.dataset.songId, title:x.dataset.title,
         artist:x.dataset.artist, vip:x.dataset.vip, cover:x.dataset.cover}}))""")
     for cand in cands:
-        click_js = "document.querySelector('.play-button[data-song-id=\"%s\"]').click()" % cand["id"]
         # 点播放必定让 #player-frame 导航到带 ?id= 的新地址（与启动时的预加载
         # iframe 区分开），直接等这次导航即可，无竞态。
         try:
@@ -130,7 +129,14 @@ def open_playable_song(limit=8):
                 predicate=lambda f: "player.html?id=" in (f.url or ""),
                 timeout=WAIT_MS,
             ) as ev:
-                page.evaluate(f"() => {{ {click_js} }}")
+                clicked = page.evaluate("""(id) => {
+                    var btn = [...document.querySelectorAll('#results-list .play-button')]
+                      .find(el => el.dataset.songId === id);
+                    if (btn) btn.click();
+                    return !!btn;
+                }""", cand["id"])
+                if not clicked:
+                    raise RuntimeError("play button not found")
             fr = ev.value
         except Exception:
             continue
@@ -141,14 +147,14 @@ def open_playable_song(limit=8):
         try:
             fr.wait_for_function(
                 "() => { var o=document.getElementById('loadingOverlay');"
-                " return !o || o.classList.contains('hidden'); }",
+                " return !!(o && o.classList.contains('hidden')); }",
                 timeout=WAIT_MS)
         except Exception:
             pass
-        title = fr.evaluate(
+        title = (fr.evaluate(
             "() => { var t=document.querySelector('[data-title]');"
-            " return t ? t.textContent : ''; }")
-        if '获取歌曲失败' not in title and '播放失败' not in title:
+            " return t ? t.textContent.trim() : ''; }") or "")
+        if title and title != '加载中...' and '获取歌曲失败' not in title and '播放失败' not in title:
             cand["_src"] = src
             return cand, fr
         page.click("#close-player")
@@ -280,7 +286,11 @@ def _():
     fr.click("[data-favorite]")
     time.sleep(0.5)
     favs = fr.evaluate("() => localStorage.getItem('yiclape:favorites')")
-    rec("播放器内收藏成功", bool(favs and favs != "[]"), (favs or "")[:160])
+    try:
+        fav_items = json.loads(favs or "{}").get("items", [])
+    except Exception:
+        fav_items = []
+    rec("播放器内收藏成功", any(str(i.get("id")) == str(first["id"]) for i in fav_items), (favs or "")[:160])
     shot("04-player-overlay.png")
 
 
@@ -337,7 +347,7 @@ def _():
     time.sleep(0.5)
     saved = page.evaluate("() => localStorage.getItem('yiclape:audio-quality')")
     closed = page.evaluate("() => !document.getElementById('qualityModal').classList.contains('active')")
-    rec("切换音质并保存", closed and saved is not None, f"saved={saved}")
+    rec("切换音质并保存", closed and saved == "exhigh", f"saved={saved}")
     page.evaluate("() => localStorage.setItem('yiclape:audio-quality','standard')")
 
 
@@ -443,7 +453,7 @@ def _():
 def _():
     page.goto(BASE + "/player.html")
     hidden = poll_until(lambda: page.evaluate(
-        "() => { var o=document.getElementById('loadingOverlay'); return !o || o.classList.contains('hidden'); }"), timeout=15)
+        "() => { var o=document.getElementById('loadingOverlay'); return !!(o && o.classList.contains('hidden')); }"), timeout=15)
     title = page.evaluate("() => document.querySelector('[data-title]')?.textContent || ''")
     artist = page.evaluate("() => document.querySelector('[data-artist]')?.textContent || ''")
     shot("09-player-direct.png")
